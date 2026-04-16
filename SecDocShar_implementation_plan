@@ -1,0 +1,453 @@
+# SecureDocChain — Full-Stack Development Plan
+### Blockchain-Powered Secure Document Sharing Platform
+**Stack: Next.js 14 · Node.js · Polygon Amoy · Solidity 0.8.20 · IPFS/Pinata**
+*Revised Plan · April 2026 · Antigravity Studio*
+
+---
+
+## Overview
+
+SecureDocChain is a **secure document sharing platform** — NOT a storage platform. Documents are encrypted client-side, pushed to IPFS, and only the hash + access permissions live on the blockchain. The focus is on **who can see what, when, and proving it immutably**.
+
+Three professional verticals are served through a single platform with mode-switched UIs:
+- **LegalVault** — Law firms (contracts, evidence, privileged comms)
+- **ScriptSafe** — Screenwriters & Production Houses (scripts, IP proof, watermarking)
+- **VaultDesk** — Businesses & Startups (NDAs, pitch decks, deal rooms)
+
+> [!IMPORTANT]
+> **Blockchain:** Polygon Amoy testnet for all development & testing. Production target is Polygon PoS mainnet. The existing Hardhat config already points to Amoy — we build on that.
+>
+> **Frontend:** Next.js 14 (App Router) — replaces the React/Vite spec in the brief.
+>
+> **Backend:** Node.js 20 LTS + Express 5 (TypeScript) — the key proxy & API service.
+
+---
+
+## Proposed Project Structure
+
+```
+d:\samir\Blockchain\SecureDocumentSharing\
+├── contracts/                    ← Existing Hardhat project (Polygon Amoy)
+│   ├── contracts/
+│   │   ├── SecureDocChain.sol    ← Core contract (REVISED below)
+│   │   └── RoyaltySplit.sol      ← NEW: ScriptSafe royalty contract
+│   ├── scripts/
+│   │   └── deploy.ts
+│   ├── test/
+│   │   └── SecureDocChain.test.ts
+│   └── hardhat.config.ts
+│
+├── frontend/                     ← NEW: Next.js 14 App
+│   ├── app/
+│   │   ├── (auth)/
+│   │   ├── (dashboard)/
+│   │   │   ├── legal/            ← LegalVault UI
+│   │   │   ├── script/           ← ScriptSafe UI
+│   │   │   └── vault/            ← VaultDesk UI
+│   │   ├── share/[token]/        ← Magic link recipient view
+│   │   └── layout.tsx
+│   ├── components/
+│   ├── lib/
+│   │   ├── crypto.ts             ← AES-256-GCM Web Crypto
+│   │   ├── ipfs.ts               ← Pinata SDK wrapper
+│   │   └── contract.ts           ← ethers.js v6 contract calls
+│   └── package.json
+│
+└── backend/                      ← NEW: Node.js API + Key Proxy
+    ├── src/
+    │   ├── routes/
+    │   ├── services/
+    │   │   ├── keyProxy.ts       ← Group key management
+    │   │   ├── magicLink.ts      ← Email auth (Magic.link)
+    │   │   ├── notifications.ts  ← Email alerts on share
+    │   │   └── watermark.ts      ← PDF watermark injection
+    │   ├── prisma/
+    │   │   └── schema.prisma     ← PostgreSQL schema
+    │   └── index.ts
+    └── package.json
+```
+
+---
+
+## Proposed Changes
+
+### Layer 1 — Smart Contracts (Revised)
+
+#### [MODIFY] [SecureDocChain.sol](file:///d:/samir/Blockchain/SecureDocumentSharing/contracts/contracts/SecureDocChain.sol)
+
+The existing contract is a solid foundation. It needs these additions to match the full brief:
+
+| Addition | Reason |
+|---|---|
+| `docType` field (`legal`/`script`/`business`) | Vertical filtering in frontend |
+| `expiry` field (Unix timestamp) | VaultDesk link-expiry feature |
+| `ipTimestamp` flag (bool) | ScriptSafe IP proof registration |
+| `accessLevel` mapping (0/1/2/3) | View/Edit/Sign tiers |
+| `verifyIntegrity()` function | Tamper detection |
+| OpenZeppelin `Ownable` + `Pausable` | Security hardening |
+| `TransparentUpgradeableProxy` wiring | Future-proofing for upgrades |
+
+**Revised full contract spec:**
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+
+contract SecureDocChain is Initializable, OwnableUpgradeable, PausableUpgradeable {
+
+    struct Document {
+        string   ipfsCID;         // Encrypted blob CID on IPFS
+        address  owner;
+        uint256  version;         // Increments on edit or key rotation
+        uint256  keyVersion;      // Increments strictly on revocation
+        uint256  timestamp;
+        string   docType;         // 'legal' | 'script' | 'business'
+        uint256  expiry;          // 0 = no expiry
+        bool     ipTimestamp;     // ScriptSafe IP proof flag
+        mapping(address => uint8) accessLevel; // 0=none,1=view,2=edit,3=sign
+    }
+
+    mapping(bytes32 => Document)  public documents;
+    mapping(bytes32 => address[]) public accessLog;
+
+    event DocumentCreated(bytes32 indexed docHash, string cid,
+                          address indexed owner, string docType,
+                          bool ipTimestamp, uint256 ts);
+    event DocumentUpdated(bytes32 indexed docHash, string newCid,
+                          uint256 version, uint256 keyVersion, uint256 ts);
+    event AccessGranted(bytes32 indexed docHash, address indexed grantee,
+                        uint8 level, uint256 ts);
+    event AccessRevoked(bytes32 indexed docHash, address indexed grantee,
+                        uint256 newKeyVersion, uint256 ts);
+    event DocumentAccessed(bytes32 indexed docHash, address indexed accessor, uint256 ts);
+
+    function initialize() public initializer {
+        __Ownable_init(msg.sender);
+        __Pausable_init();
+    }
+
+    function createDocument(
+        bytes32 _docHash, string calldata _cid,
+        string calldata _docType, uint256 _expiry, bool _ipTimestamp
+    ) external whenNotPaused {
+        require(documents[_docHash].owner == address(0), "Already exists");
+        Document storage d = documents[_docHash];
+        d.ipfsCID      = _cid;
+        d.owner        = msg.sender;
+        d.version      = 1;
+        d.keyVersion   = 1;
+        d.timestamp    = block.timestamp;
+        d.docType      = _docType;
+        d.expiry       = _expiry;
+        d.ipTimestamp  = _ipTimestamp;
+        d.accessLevel[msg.sender] = 3;
+        emit DocumentCreated(_docHash, _cid, msg.sender, _docType, _ipTimestamp, block.timestamp);
+    }
+
+    function grantAccess(bytes32 _dh, address _user, uint8 _level) external {
+        require(documents[_dh].owner == msg.sender, "Not owner");
+        require(_level >= 1 && _level <= 3, "Bad level");
+        documents[_dh].accessLevel[_user] = _level;
+        emit AccessGranted(_dh, _user, _level, block.timestamp);
+    }
+
+    function revokeAccess(bytes32 _dh, address _user, string calldata _newCid) external {
+        require(documents[_dh].owner == msg.sender, "Not owner");
+        Document storage d = documents[_dh];
+        d.accessLevel[_user] = 0;
+        d.ipfsCID    = _newCid;     // new CID after re-encryption
+        d.version   += 1;
+        d.keyVersion += 1;          // mandatory on revocation
+        d.timestamp  = block.timestamp;
+        emit AccessRevoked(_dh, _user, d.keyVersion, block.timestamp);
+        emit DocumentUpdated(_dh, _newCid, d.version, d.keyVersion, block.timestamp);
+    }
+
+    function logAccess(bytes32 _dh) external {
+        require(documents[_dh].accessLevel[msg.sender] >= 1, "Unauthorized");
+        if (documents[_dh].expiry > 0) {
+            require(block.timestamp <= documents[_dh].expiry, "Expired");
+        }
+        accessLog[_dh].push(msg.sender);
+        emit DocumentAccessed(_dh, msg.sender, block.timestamp);
+    }
+
+    function verifyIntegrity(bytes32 _dh, string calldata _cid) external view returns (bool) {
+        return keccak256(abi.encodePacked(documents[_dh].ipfsCID)) ==
+               keccak256(abi.encodePacked(_cid));
+    }
+
+    function getDocumentState(bytes32 _dh) external view
+        returns (string memory cid, uint256 version, uint256 keyVersion, uint256 expiry) {
+        Document storage d = documents[_dh];
+        return (d.ipfsCID, d.version, d.keyVersion, d.expiry);
+    }
+
+    function pause() external onlyOwner { _pause(); }
+    function unpause() external onlyOwner { _unpause(); }
+}
+```
+
+#### [NEW] `RoyaltySplit.sol` — ScriptSafe Royalty Contract
+- Separate audited contract deployed per deal
+- Stores percentage splits per wallet address
+- `triggerPayout()` callable by any party — auto-distributes received MATIC
+
+---
+
+### Layer 2 — Backend: Node.js API + Key Proxy
+
+#### [NEW] `backend/` — Node.js 20 LTS + Express 5 + TypeScript
+
+**Core responsibilities:**
+1. **Key Proxy Service** — stores encrypted AES keys per recipient per doc (NOT plaintext). On revocation, re-generates wrapped keys for remaining users.
+2. **Magic Link Auth** — integrates Magic.link SDK. Maps email → wallet address in PostgreSQL.
+3. **Email Notifications** — triggers on `AccessGranted` events (Nodemailer / Resend).
+4. **PDF Watermarking Service** — server-side watermark injection with recipient's email + timestamp baked into the PDF bytes (using pdf-lib).
+5. **REST API** — all core actions exposed via versioned REST endpoints documented in Swagger.
+6. **Webhook System** — fires to Slack/Zapier on access events queried from on-chain logs.
+
+**PostgreSQL Schema (Prisma):**
+```prisma
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  walletAddr  String?  @unique
+  vertical    String   // 'legal' | 'script' | 'business'
+  createdAt   DateTime @default(now())
+  documents   Document[]
+  sharedWith  Share[]
+}
+
+model Document {
+  id           String   @id @default(cuid())
+  docHash      String   @unique   // bytes32 from blockchain
+  name         String
+  docType      String
+  ownerEmail   String
+  owner        User     @relation(fields: [ownerEmail], references: [email])
+  ipfsCid      String
+  encKeyStore  String   // JSON: { recipientEmail: wrappedAESKeyHex }
+  createdAt    DateTime @default(now())
+  shares       Share[]
+}
+
+model Share {
+  id           String   @id @default(cuid())
+  docId        String
+  document     Document @relation(fields: [docId], references: [id])
+  recipientEmail String
+  recipient    User?    @relation(fields: [recipientEmail], references: [email])
+  accessLevel  Int      // 1=view, 2=edit, 3=sign
+  magicToken   String?  @unique
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  createdAt    DateTime @default(now())
+}
+```
+
+---
+
+### Layer 3 — Frontend: Next.js 14 (App Router)
+
+#### [NEW] `frontend/` — Next.js 14 + TypeScript + Tailwind CSS
+
+**Pages & Routes:**
+
+| Route | Description |
+|---|---|
+| `/` | Landing page — product overview, vertical selection |
+| `/auth` | Login: MetaMask / WalletConnect / Email Magic Link |
+| `/onboarding` | Vertical selection wizard (LegalVault / ScriptSafe / VaultDesk) |
+| `/dashboard` | Unified dashboard — document list, share queue, audit feed |
+| `/dashboard/legal/*` | LegalVault — matter rooms, privilege wall, digital seal |
+| `/dashboard/script/*` | ScriptSafe — IP timestamp, watermark viewer, royalties |
+| `/dashboard/vault/*` | VaultDesk — deal room, NDA vault, investor portal |
+| `/share/[token]` | Public magic-link recipient viewer (no auth required) |
+| `/audit/[docHash]` | Full audit timeline for a document |
+| `/settings` | Vertical switch, profile, team management |
+
+**Key Frontend Libraries:**
+- `ethers.js v6` — contract interaction
+- `@web3modal/ethers` (WalletConnect v2) — wallet modal
+- `@pinata/sdk` — IPFS upload (server-side Next.js API route)
+- `pdf-lib` / `pdfjs-dist` — PDF watermark + in-browser viewer
+- `magic-sdk` — email magic link auth
+- `@prisma/client` — called from Next.js API routes
+
+**Encryption Flow (client-side, browser only):**
+```
+User selects file
+    ↓
+Generate random AES-256-GCM key (Web Crypto API)
+    ↓
+Encrypt file bytes → ArrayBuffer
+    ↓
+POST encrypted blob to Next.js API route → Pinata → returns CID
+    ↓
+keccak256(CID + ownerAddress + timestamp) → docHash
+    ↓
+Wrap AES key with recipient's public key (ECDSA via ethers.js)
+    ↓
+POST wrapped key → backend KeyProxy (stored encrypted in DB)
+    ↓
+Call contract.createDocument(docHash, CID, docType, expiry, ipTimestamp)
+    ↓ (Polygon Amoy tx)
+Emit DocumentCreated event → audit trail starts
+```
+
+---
+
+## Milestone Schedule
+
+### Phase 0 — Foundation (Week 1)
+- [ ] Revise `SecureDocChain.sol` with full feature set (docType, expiry, accessLevel tiers, ipTimestamp, verifyIntegrity, upgradeable proxy)
+- [ ] Add `RoyaltySplit.sol` skeleton
+- [ ] Write Hardhat deploy script targeting **Polygon Amoy**
+- [ ] Deploy to Amoy — share contract address + ABI
+- [ ] Write Hardhat test suite (≥80% coverage): upload, grant, revoke, expiry, tamper-detect
+- [ ] Run Slither — resolve all HIGH findings
+- [ ] Scaffold Next.js 14 frontend (`frontend/`)
+- [ ] Scaffold Node.js backend (`backend/`)
+- [ ] Set up PostgreSQL + Prisma schema
+- [ ] GitHub Actions CI: Lint → Test → Slither → Deploy to Amoy
+
+### Phase 1 — Core Upload Flow (Week 2)
+- [ ] Client-side AES-256-GCM encryption (Web Crypto API)
+- [ ] Pinata IPFS upload via Next.js API route
+- [ ] `createDocument()` contract call + on-chain hash
+- [ ] Wallet auth: MetaMask + WalletConnect v2 (Web3Modal)
+- [ ] Email auth: Magic.link integration
+- [ ] Share by email: backend wraps AES key + calls `grantAccess()`
+- [ ] Email notification on share (recipient gets magic link)
+- [ ] Basic document dashboard (list + upload button)
+
+### Phase 2 — Access Control & Audit UI (Week 3)
+- [ ] Grant/revoke UI with access level tiers (View / Edit / Sign)
+- [ ] Revocation flow: re-encrypt → new CID → `revokeAccess()` with new CID
+- [ ] Audit log viewer — parse on-chain events → plain-English timeline
+- [ ] Magic link recipient page: `/share/[token]` — in-browser PDF viewer
+- [ ] Email notification: access revoked alert
+- [ ] Tamper detection UI badge (calls `verifyIntegrity()`)
+- [ ] Staging environment live (Vercel + Railway)
+
+### Phase 3 — Vertical Modules (Week 4)
+- [ ] **LegalVault**: Matter rooms (folder-scoped workspaces), Privilege Wall tag, Digital Seal (PDF cert generated)
+- [ ] **ScriptSafe**: IP Timestamp toggle on upload, PDF watermark reading room (PDF.js + canvas), Draft progression (version diff view)
+- [ ] **VaultDesk**: Deal room with open-tracking analytics, Link expiry (max views, date), NDA counter-sign flow (on-chain e-signature)
+- [ ] Onboarding wizard — vertical selection persisted to DB
+
+### Phase 4 — Compliance & Polish (Week 5)
+- [ ] E-Discovery export (LegalVault): EDRM XML + PDF audit report
+- [ ] IP Timestamp certificate PDF (ScriptSafe): includes tx hash, block, timestamp, owner wallet
+- [ ] Revoke-on-Exit flow (VaultDesk): bulk revoke all docs for an offboarded user
+- [ ] GDPR key-deletion erasure demonstration
+- [ ] Slither re-run — zero HIGH/MEDIUM findings
+- [ ] Full gas optimisation pass — `createDocument < 200k gas`, `grantAccess < 50k gas`
+- [ ] UX pass — remove all blockchain jargon from copy
+
+### Phase 5 — Production Deploy (Week 6)
+- [ ] Deploy to **Polygon Amoy** (testnet sign-off) + document switch path to Polygon PoS mainnet
+- [ ] Vercel + Railway production hosting + custom domain + SSL
+- [ ] Smoke test all three verticals end-to-end
+- [ ] Security audit prep (Slither + Mythril reports packaged)
+
+### Phase 6 — API & Integrations (Weeks 7–8)
+- [ ] REST API v1 (Swagger docs): upload, share, revoke, audit-export
+- [ ] Webhook system (fires to Slack/Zapier on access events)
+- [ ] Zapier integration + Slack `/securedoc` slash command
+
+### Phase 7 — Enterprise LegalVault (Weeks 9–10)
+- [ ] Hyperledger Fabric node setup (private channels for law firm consortia)
+- [ ] Admin console + enterprise SSO (SAML/OIDC)
+
+### Phase 8 — Mobile (Weeks 11–14)
+- [ ] React Native 0.74 + Expo SDK 51 — iOS & Android
+- [ ] Feature parity: upload, share, audit, revoke
+- [ ] App Store + Play Store submission
+
+---
+
+## Tech Stack (Locked)
+
+| Layer | Technology | Version |
+|---|---|---|
+| Blockchain (Dev/Test) | **Polygon Amoy testnet** + Hardhat | Hardhat 2.x |
+| Blockchain (Production) | **Polygon PoS mainnet** | EVM-compatible |
+| Smart Contracts | Solidity + OpenZeppelin v5 | 0.8.20 |
+| Frontend | **Next.js** (App Router) + TypeScript | 14.x |
+| Styling | Tailwind CSS | 3.4 |
+| Web3 | ethers.js v6 + Web3Modal (WalletConnect v2) | — |
+| Backend API | **Node.js** + Express 5 + TypeScript | Node 20 LTS |
+| Database | PostgreSQL 16 + Prisma ORM | — |
+| Storage | IPFS via Pinata SDK v2 | — |
+| Auth (non-Web3) | Magic.link SDK | — |
+| File Encryption | Web Crypto API (AES-256-GCM) | Browser-native |
+| Key Wrapping | ECDSA via ethers.js | — |
+| PDF Viewer | PDF.js (Mozilla) | — |
+| Testing (Contracts) | Hardhat + Chai | ≥80% coverage |
+| Testing (UI) | Vitest + Testing Library | — |
+| CI/CD | GitHub Actions | — |
+| Hosting | Vercel (frontend) + Railway (backend) | — |
+| Mobile (Phase 2) | React Native + Expo | 0.74 / SDK 51 |
+
+---
+
+## Security Requirements (Non-Negotiable)
+
+> [!CAUTION]
+> These are hard acceptance criteria — no milestone ships without them passing.
+
+- Raw file bytes **never** leave the browser unencrypted — verified by network inspector
+- AES encryption keys **never** stored in plaintext in any DB, log, or env variable
+- Slither static analysis → **zero HIGH-severity** findings on all contracts
+- Revoking access makes document inaccessible within **one block** (~2s on Polygon Amoy)
+- `verifyIntegrity()` returns `false` if IPFS file is tampered
+- Gas limits: `createDocument < 200,000 gas`, `grantAccess < 50,000 gas`
+- No blockchain jargon in any user-facing UI copy
+
+---
+
+## Open Questions for Kickoff
+
+> [!IMPORTANT]
+> These decisions will affect Week 1 implementation. Please confirm before development begins.
+
+1. **Which vertical ships first?** Recommendation: **VaultDesk** — largest addressable market, simplest compliance overhead
+2. **Magic.link vs alternatives?** (Alternatives: Privy.io, Dynamic.xyz — both have better DX for embedded wallets)
+3. **Pinata API credentials** — needed on Day 1 for IPFS integration
+4. **Royalty contract** in MVP or Phase 2?
+5. **Expected user volume at launch?** — determines Pinata tier ($20/mo 100GB vs $200/mo 1TB)
+6. **Professional security audit** — who engages it? (Recommend OpenZeppelin / Trail of Bits, budget $5k–8k)
+
+---
+
+## Verification Plan
+
+### Automated
+```bash
+# Contracts
+cd contracts && npx hardhat test
+npx hardhat coverage   # Must be ≥80%
+npx slither contracts/SecureDocChain.sol
+
+# Frontend
+cd frontend && npm run test
+
+# Backend
+cd backend && npm run test
+```
+
+### Manual (per milestone)
+- Upload 5MB PDF → verify CID appears on Pinata dashboard
+- Connect MetaMask on Polygon Amoy → verify tx on Amoy PolygonScan
+- Share via email → recipient opens via magic link → verify `DocumentAccessed` event on-chain
+- Revoke access → recipient's magic link returns 403 → verify `keyVersion` incremented
+- Verify `verifyIntegrity()` returns `false` after IPFS content tamper
+
+---
+
+*SecureDocChain Development Plan · Antigravity Studio · April 2026*

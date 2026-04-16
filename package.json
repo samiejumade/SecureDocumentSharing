@@ -1,0 +1,14 @@
+{
+  "name": "secure-doc-sharing",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "contracts"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=frontend",
+    "build": "npm run build --workspace=frontend",
+    "install:all": "npm install"
+  }
+}
