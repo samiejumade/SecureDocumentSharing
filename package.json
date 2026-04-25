@@ -13,5 +13,8 @@
   },
   "dependencies": {
     "mailersend": "^2.8.0"
+  },
+  "engines": {
+    "node": "20.x"
   }
 }
