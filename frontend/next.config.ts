@@ -4,6 +4,9 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  experimental: {
+    memoryBasedWorkersCount: true,
+  },
   webpack: (config) => {
     // Wagmi connectors use dynamic imports for optional wallet SDKs.
     // These are caught with try/catch in the source, so we tell webpack
