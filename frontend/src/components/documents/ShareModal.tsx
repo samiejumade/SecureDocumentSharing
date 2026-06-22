@@ -65,6 +65,11 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
     setEmailError("");
     setMagicLink("");
 
+    // Build token FIRST so it is always available even if the on-chain TX fails
+    const token = buildMagicToken();
+    const fullLink = `${window.location.origin}/share/${token}`;
+    setMagicLink(fullLink);
+
     let currentTxHash = "";
 
     try {
@@ -105,9 +110,6 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
 
       // Send magic link email if email was provided
       if (recipientEmail) {
-        const token = buildMagicToken();
-        const fullLink = `${window.location.origin}/share/${token}`;
-        setMagicLink(fullLink);
         try {
           const res = await fetch("/api/share", {
             method: "POST",
@@ -146,7 +148,8 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
         onClose();
       }, emailError ? 8000 : 3500); // keep open longer if email failed
     } catch (e: any) {
-      setError(e?.message || "Failed to grant access");
+      // TX failed — keep magic link visible so sender can share manually
+      setError(e?.message || "Transaction failed. Share via the magic link below.");
     } finally {
       setIsSharing(false);
     }
@@ -286,11 +289,70 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
                 border: "1px solid rgba(251,113,133,0.2)",
                 fontSize: 13,
                 color: "var(--accent-red)",
-                marginBottom: 16,
+                marginBottom: 12,
               }}
             >
               <AlertTriangle size={14} style={{ verticalAlign: "middle", marginRight: 6 }} />
               {error}
+            </div>
+          )}
+
+          {/* TX failed — show copyable magic link so sender can share manually */}
+          {error && magicLink && (
+            <div
+              style={{
+                padding: "14px 16px",
+                borderRadius: 12,
+                background: "rgba(251,191,36,0.05)",
+                border: "1px solid rgba(251,191,36,0.2)",
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#fbbf24", marginBottom: 6 }}>
+                Share manually via magic link:
+              </div>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-muted)",
+                  wordBreak: "break-all",
+                  background: "rgba(0,0,0,0.2)",
+                  borderRadius: 6,
+                  padding: "6px 8px",
+                  fontFamily: "monospace",
+                  marginBottom: 8,
+                  lineHeight: 1.5,
+                }}
+              >
+                {magicLink}
+              </div>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(magicLink).then(() => {
+                    setLinkCopied(true);
+                    setTimeout(() => setLinkCopied(false), 2500);
+                  });
+                }}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  padding: "7px 12px",
+                  borderRadius: 8,
+                  background: linkCopied ? "rgba(52,211,153,0.1)" : "rgba(255,255,255,0.04)",
+                  border: `1px solid ${linkCopied ? "rgba(52,211,153,0.25)" : "var(--border-subtle)"}`,
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: linkCopied ? "var(--accent-emerald)" : "var(--text-secondary)",
+                  transition: "all 0.2s ease",
+                }}
+              >
+                {linkCopied ? <Check size={13} /> : <Copy size={13} />}
+                {linkCopied ? "Copied!" : "Copy Magic Link"}
+              </button>
             </div>
           )}
 

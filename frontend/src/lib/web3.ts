@@ -4,7 +4,7 @@
    Provider sourced from any connected wallet via wagmi.
    ───────────────────────────────────────────────── */
 
-import { BrowserProvider, Contract, keccak256, toUtf8Bytes } from "ethers";
+import { BrowserProvider, Contract, keccak256, toUtf8Bytes, parseUnits } from "ethers";
 import { CONTRACT_ADDRESS, CONTRACT_ABI, AMOY_CHAIN_ID, AMOY_NETWORK } from "./contract";
 
 /* ── Types ─────────────────────────────────────── */
@@ -54,6 +54,18 @@ async function getContract(): Promise<Contract> {
   const provider = getProvider();
   const signer = await provider.getSigner();
   return new Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+}
+
+/**
+ * Polygon Amoy requires a minimum gas tip of 25 gwei.
+ * We set 30 gwei tip cap + 100 gwei max fee to ensure txs never fail
+ * with "gas tip cap below minimum" (RPC error -32603).
+ */
+function getAmoyGasOverrides() {
+  return {
+    maxPriorityFeePerGas: parseUnits("30", "gwei"),  // 30 gwei tip (min is 25)
+    maxFeePerGas: parseUnits("100", "gwei"),          // 100 gwei max fee
+  };
 }
 
 async function getReadContract(): Promise<Contract> {
@@ -137,7 +149,7 @@ export async function anchorDocument(
   const contract = await getContract();
   const docHash = keccak256(toUtf8Bytes(`${fileName}::${cid}`));
 
-  const tx = await contract.createDocument(docHash, cid, docType, expiry, ipTimestamp);
+  const tx = await contract.createDocument(docHash, cid, docType, expiry, ipTimestamp, getAmoyGasOverrides());
   const receipt = await tx.wait(1);
 
   return {
@@ -156,7 +168,7 @@ export async function grantDocumentAccess(
   level: number = 1
 ): Promise<GrantResult> {
   const contract = await getContract();
-  const tx = await contract.grantAccess(docHash, userAddress, level);
+  const tx = await contract.grantAccess(docHash, userAddress, level, getAmoyGasOverrides());
   const receipt = await tx.wait(1);
 
   return {
@@ -174,7 +186,7 @@ export async function revokeDocumentAccess(
   newCid: string
 ): Promise<GrantResult> {
   const contract = await getContract();
-  const tx = await contract.revokeAccess(docHash, userAddress, newCid);
+  const tx = await contract.revokeAccess(docHash, userAddress, newCid, getAmoyGasOverrides());
   const receipt = await tx.wait(1);
 
   return {
@@ -188,7 +200,7 @@ export async function revokeDocumentAccess(
  */
 export async function logDocumentAccess(docHash: string): Promise<string> {
   const contract = await getContract();
-  const tx = await contract.logAccess(docHash);
+  const tx = await contract.logAccess(docHash, getAmoyGasOverrides());
   const receipt = await tx.wait(1);
   return receipt.hash;
 }
