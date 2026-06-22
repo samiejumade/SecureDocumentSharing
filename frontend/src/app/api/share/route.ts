@@ -5,11 +5,9 @@
    ───────────────────────────────────────────────── */
 
 import { NextRequest, NextResponse } from "next/server";
-import { MailerSend, EmailParams, Sender, Recipient } from "mailersend";
+import { Resend } from "resend";
 
-const mailerSend = new MailerSend({
-  apiKey: process.env.MAILERSEND_API_KEY || "",
-});
+const resend = new Resend(process.env.RESEND_KEY || "");
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,8 +18,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    if (!process.env.MAILERSEND_API_KEY) {
-      return NextResponse.json({ error: "MAILERSEND_API_KEY not configured" }, { status: 500 });
+    if (!process.env.RESEND_KEY) {
+      return NextResponse.json({ error: "RESEND_KEY not configured" }, { status: 500 });
     }
 
     const accessLabel =
@@ -33,24 +31,10 @@ export async function POST(req: NextRequest) {
 
     const magicLink = `${req.nextUrl.origin}/share/${token}`;
 
-    // MailerSend sender — set via env, e.g. "noreply@trial-xxxxx.mlsender.net"
-    const fromEmail = process.env.MAILERSEND_FROM_EMAIL || "";
-    if (!fromEmail) {
-      return NextResponse.json(
-        { error: "MAILERSEND_FROM_EMAIL not configured. Check your MailerSend dashboard > Domains for your trial sender address." },
-        { status: 500 }
-      );
-    }
+    // Resend sender — defaults to onboarding@resend.dev for free tier
+    const fromEmail = process.env.RESEND_FROM_EMAIL || "SecureDocChain <onboarding@resend.dev>";
 
-    const sentFrom = new Sender(fromEmail, "SecureDocChain");
-
-    const recipients = [new Recipient(recipientEmail)];
-
-    const emailParams = new EmailParams()
-      .setFrom(sentFrom)
-      .setTo(recipients)
-      .setSubject(`📄 A document has been shared with you — ${documentName}`)
-      .setHtml(`
+    const htmlContent = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -126,21 +110,30 @@ export async function POST(req: NextRequest) {
   </table>
 </body>
 </html>
-      `)
-      .setText(
-        `A document "${documentName}" has been shared with you on SecureDocChain.\n\nAccess Level: ${accessLabel}\nShared By: ${senderAddress || "Anonymous"}\n\nOpen your secure document: ${magicLink}\n\nThis document is end-to-end encrypted and your access is logged on the Polygon blockchain.`
-      );
+    `;
 
-    const response = await mailerSend.email.send(emailParams);
+    const textContent = `A document "${documentName}" has been shared with you on SecureDocChain.\n\nAccess Level: ${accessLabel}\nShared By: ${senderAddress || "Anonymous"}\n\nOpen your secure document: ${magicLink}\n\nThis document is end-to-end encrypted and your access is logged on the Polygon blockchain.`;
+
+    const response = await resend.emails.send({
+      from: fromEmail,
+      to: recipientEmail,
+      subject: `📄 A document has been shared with you — ${documentName}`,
+      html: htmlContent,
+      text: textContent,
+    });
+
+    if (response.error) {
+      throw new Error(response.error.message || "Failed to send email");
+    }
 
     return NextResponse.json({
       success: true,
-      statusCode: response.statusCode,
+      id: response.data?.id,
     });
   } catch (e: any) {
     console.error("Share API error:", e);
     return NextResponse.json(
-      { error: e?.body?.message || e?.message || "Failed to send email" },
+      { error: e?.message || "Failed to send email" },
       { status: 500 }
     );
   }

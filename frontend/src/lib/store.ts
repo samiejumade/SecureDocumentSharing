@@ -24,6 +24,8 @@ export interface StoredDocument {
   expiry: number;           // Unix timestamp, 0 = no expiry
   ipTimestamp: boolean;     // ScriptSafe IP proof flag
   sharedWith: SharedAccess[];
+  accessLevel?: AccessLevel;
+  shareToken?: string;
 }
 
 export interface SharedAccess {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Send, Eye, FileText, Shield, CheckCircle, AlertTriangle, Mail, Copy, Check } from "lucide-react";
 import Modal from "@/components/ui/Modal";
 import Input from "@/components/ui/Input";
@@ -28,6 +28,23 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
   const [emailError, setEmailError] = useState("");
   const [magicLink, setMagicLink] = useState("");
   const [linkCopied, setLinkCopied] = useState(false);
+
+  // Clean up and reset state when modal is closed
+  useEffect(() => {
+    if (!isOpen) {
+      setRecipientAddress("");
+      setRecipientEmail("");
+      setAccessLevel(1);
+      setIsSharing(false);
+      setShareSuccess(false);
+      setError("");
+      setTxHash("");
+      setEmailSent(false);
+      setEmailError("");
+      setMagicLink("");
+      setLinkCopied(false);
+    }
+  }, [isOpen]);
 
   if (!document) return null;
 
@@ -108,6 +125,8 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
         category: "access",
       });
 
+      let hasEmailError = false;
+
       // Send magic link email if email was provided
       if (recipientEmail) {
         try {
@@ -126,27 +145,24 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
           if (data.success) {
             setEmailSent(true);
           } else {
+            hasEmailError = true;
             setEmailError(data.error || "Email delivery failed");
           }
         } catch (emailErr: any) {
+          hasEmailError = true;
           setEmailError(emailErr?.message || "Email delivery failed");
           // Continue — the on-chain grant already succeeded
         }
       }
 
       setShareSuccess(true);
-      setTimeout(() => {
-        setShareSuccess(false);
-        setRecipientAddress("");
-        setRecipientEmail("");
-        setAccessLevel(1);
-        setTxHash("");
-        setEmailSent(false);
-        setEmailError("");
-        setMagicLink("");
-        setLinkCopied(false);
-        onClose();
-      }, emailError ? 8000 : 3500); // keep open longer if email failed
+
+      // Only auto-close if the email succeeded and no manual copy is needed
+      if (!hasEmailError) {
+        setTimeout(() => {
+          onClose();
+        }, 3500);
+      }
     } catch (e: any) {
       // TX failed — keep magic link visible so sender can share manually
       setError(e?.message || "Transaction failed. Share via the magic link below.");
@@ -475,10 +491,18 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
             {recipientEmail || recipientAddress}
           </p>
           {txHash && (
-            <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 12, fontFamily: "monospace" }}>
+            <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 12, fontFamily: "monospace", marginBottom: 16 }}>
               tx: {txHash.slice(0, 10)}...{txHash.slice(-8)}
             </p>
           )}
+
+          <Button
+            variant="secondary"
+            style={{ width: "100%", marginTop: 16 }}
+            onClick={onClose}
+          >
+            Done
+          </Button>
         </div>
       )}
     </Modal>

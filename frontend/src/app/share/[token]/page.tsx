@@ -79,7 +79,7 @@ const ACCESS_CONFIG: Record<
 };
 
 /** Save the shared document into recipient's localStorage so it appears in their dashboard */
-function importSharedDocument(payload: TokenPayload): boolean {
+function importSharedDocument(payload: TokenPayload, token: string): boolean {
   try {
     const existing = getDocuments();
     const alreadyImported = existing.some(
@@ -103,6 +103,8 @@ function importSharedDocument(payload: TokenPayload): boolean {
       expiry: 0,
       ipTimestamp: false,
       sharedWith: [],
+      accessLevel: payload.level as any,
+      shareToken: token,
     };
 
     saveDocument(doc);
@@ -161,8 +163,8 @@ export default function ShareViewPage() {
       }
 
       // Auto-import the document into recipient's localStorage dashboard
-      if (payload) {
-        const imported = importSharedDocument(payload);
+      if (payload && token) {
+        const imported = importSharedDocument(payload, token);
         setDocImported(imported);
       }
 
@@ -183,6 +185,109 @@ export default function ShareViewPage() {
     ? new Date(payload.sharedAt).toLocaleString()
     : "";
   const cid = payload?.cid || "";
+
+  // Inline Preview state
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewText, setPreviewText] = useState<string | null>(null);
+  const [previewType, setPreviewType] = useState<"pdf" | "image" | "text" | "unknown" | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [showPreview, setShowPreview] = useState(false);
+
+  const loadInlinePreview = async () => {
+    if (!cid) {
+      setPreviewError("No IPFS CID available for preview.");
+      return;
+    }
+    setLoadingPreview(true);
+    setPreviewError("");
+
+    try {
+      const url = `${GATEWAY_URL}/${cid}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(
+          `Failed to fetch from IPFS (${res.status}). The file may no longer be pinned.`
+        );
+      }
+
+      const encryptedData = await res.arrayBuffer();
+      let decrypted: ArrayBuffer;
+
+      if (payload?.encKeyHex) {
+        try {
+          const keyBytes = new Uint8Array(payload.encKeyHex.length / 2);
+          for (let i = 0; i < payload.encKeyHex.length; i += 2) {
+            keyBytes[i / 2] = parseInt(
+              payload.encKeyHex.substring(i, i + 2),
+              16
+            );
+          }
+          const cryptoKey = await crypto.subtle.importKey(
+            "raw",
+            keyBytes,
+            { name: "AES-GCM", length: 256 },
+            false,
+            ["decrypt"]
+          );
+
+          const data = new Uint8Array(encryptedData);
+          const iv = data.slice(0, 12);
+          const ciphertext = data.slice(12);
+
+          decrypted = await crypto.subtle.decrypt(
+            { name: "AES-GCM", iv, tagLength: 128 },
+            cryptoKey,
+            ciphertext
+          );
+        } catch (decryptErr) {
+          throw new Error("Failed to decrypt document. The encryption key may be invalid.");
+        }
+      } else {
+        decrypted = encryptedData;
+      }
+
+      // Detect file type by extension
+      const ext = docName.split(".").pop()?.toLowerCase() || "";
+      if (ext === "pdf") {
+        const blob = new Blob([decrypted], { type: "application/pdf" });
+        setPreviewUrl(URL.createObjectURL(blob));
+        setPreviewType("pdf");
+      } else if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) {
+        const mimeType = ext === "svg" ? "image/svg+xml" : `image/${ext}`;
+        const blob = new Blob([decrypted], { type: mimeType });
+        setPreviewUrl(URL.createObjectURL(blob));
+        setPreviewType("image");
+      } else if (["txt", "json", "md", "csv", "html", "xml", "js", "ts"].includes(ext)) {
+        const text = new TextDecoder().decode(decrypted);
+        setPreviewText(text);
+        setPreviewType("text");
+      } else {
+        setPreviewType("unknown");
+      }
+      setShowPreview(true);
+    } catch (e: any) {
+      setPreviewError(e?.message || "Failed to load document preview");
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  // Automatically trigger preview decryption when verification succeeds
+  useEffect(() => {
+    if (verified && cid) {
+      loadInlinePreview();
+    }
+  }, [verified, cid]);
+
+  // Clean up object URL to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
 
   /** Download from IPFS, decrypt with AES key, trigger browser download */
   const handleDownload = async () => {
@@ -637,10 +742,12 @@ export default function ShareViewPage() {
               {/* Action Buttons */}
               <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
                 <Button
-                  variant="primary"
-                  style={{ flex: 1 }}
+                  variant={accessLevel === 1 ? "secondary" : "primary"}
+                  style={{ flex: 1, opacity: accessLevel === 1 ? 0.6 : 1, cursor: accessLevel === 1 ? "not-allowed" : "pointer" }}
                   icon={
-                    downloading ? (
+                    accessLevel === 1 ? (
+                      <Lock size={14} />
+                    ) : downloading ? (
                       <Loader2
                         size={14}
                         style={{ animation: "shield-spin 1s linear infinite" }}
@@ -649,10 +756,11 @@ export default function ShareViewPage() {
                       <Download size={14} />
                     )
                   }
-                  onClick={handleDownload}
+                  onClick={accessLevel === 1 ? undefined : handleDownload}
+                  disabled={accessLevel === 1}
                   loading={downloading}
                 >
-                  {downloading ? "Downloading..." : "Download Document"}
+                  {accessLevel === 1 ? "Download Locked (View Only)" : downloading ? "Downloading..." : "Download Document"}
                 </Button>
                 {accessLevel >= 2 && (
                   <Button
@@ -671,6 +779,140 @@ export default function ShareViewPage() {
                   </Button>
                 )}
               </div>
+
+              {/* ─── Inline Document Preview Pane ─── */}
+              {showPreview && (
+                <div
+                  className="fade-in"
+                  style={{
+                    padding: "20px",
+                    borderRadius: 16,
+                    background: "rgba(255,255,255,0.02)",
+                    border: "1px solid var(--border-subtle)",
+                    marginBottom: 20,
+                    textAlign: "center",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: 14,
+                    }}
+                  >
+                    <h4
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 700,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        color: "var(--text-primary)",
+                      }}
+                    >
+                      <Eye size={16} color="var(--accent-teal)" style={{ flexShrink: 0 }} />
+                      Document Preview
+                    </h4>
+                    <span style={{ fontSize: 10, color: "var(--text-muted)", textTransform: "uppercase", fontWeight: 600, letterSpacing: 0.5 }}>
+                      {previewType}
+                    </span>
+                  </div>
+
+                  {loadingPreview && (
+                    <div style={{ padding: "40px 0", color: "var(--text-muted)", fontSize: 13 }}>
+                      <Loader2
+                        size={20}
+                        style={{ animation: "shield-spin 1s linear infinite", margin: "0 auto 10px" }}
+                        color="var(--accent-teal)"
+                      />
+                      Decrypting preview...
+                    </div>
+                  )}
+
+                  {previewError && (
+                    <div
+                      style={{
+                        padding: "12px 14px",
+                        borderRadius: 10,
+                        background: "rgba(251,113,133,0.06)",
+                        border: "1px solid rgba(251,113,133,0.15)",
+                        fontSize: 12,
+                        color: "var(--accent-red)",
+                        textAlign: "left",
+                      }}
+                    >
+                      <AlertTriangle size={14} style={{ verticalAlign: "middle", marginRight: 6 }} />
+                      {previewError}
+                    </div>
+                  )}
+
+                  {!loadingPreview && !previewError && (
+                    <div style={{ marginTop: 8 }}>
+                      {previewType === "pdf" && previewUrl && (
+                        <iframe
+                          src={previewUrl}
+                          style={{
+                            width: "100%",
+                            height: "480px",
+                            border: "none",
+                            borderRadius: "12px",
+                            background: "white",
+                          }}
+                        />
+                      )}
+                      {previewType === "image" && previewUrl && (
+                        <div style={{ background: "rgba(0,0,0,0.2)", padding: 10, borderRadius: 12 }}>
+                          <img
+                            src={previewUrl}
+                            alt={docName}
+                            style={{
+                              maxWidth: "100%",
+                              maxHeight: "480px",
+                              objectFit: "contain",
+                              borderRadius: "8px",
+                              margin: "0 auto",
+                            }}
+                          />
+                        </div>
+                      )}
+                      {previewType === "text" && previewText && (
+                        <pre
+                          style={{
+                            width: "100%",
+                            maxHeight: "400px",
+                            overflow: "auto",
+                            padding: "16px",
+                            borderRadius: "12px",
+                            background: "rgba(0,0,0,0.3)",
+                            border: "1px solid var(--border-subtle)",
+                            color: "var(--text-primary)",
+                            fontFamily: "monospace",
+                            fontSize: "12px",
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-all",
+                            textAlign: "left",
+                            lineHeight: 1.5,
+                          }}
+                        >
+                          {previewText}
+                        </pre>
+                      )}
+                      {previewType === "unknown" && (
+                        <div style={{ padding: "30px 20px", color: "var(--text-muted)", fontSize: 13 }}>
+                          <AlertTriangle size={24} style={{ margin: "0 auto 10px", opacity: 0.5 }} />
+                          Inline preview not available for this file type.
+                          {accessLevel > 1 && (
+                            <div style={{ marginTop: 8, fontSize: 12 }}>
+                              Please download the document to view it.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* ─── Edit & Sign Panel ─── */}
               {showEditor && accessLevel >= 2 && (
