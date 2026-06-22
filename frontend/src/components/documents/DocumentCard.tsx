@@ -7,7 +7,7 @@ import type { StoredDocument } from "@/lib/store";
 
 interface DocumentCardProps {
   doc: StoredDocument;
-  onShare: (doc: StoredDocument) => void;
+  onShare?: (doc: StoredDocument) => void;
   onVerify?: (doc: StoredDocument) => void;
   onManageAccess?: (doc: StoredDocument) => void;
 }
@@ -137,17 +137,19 @@ export default function DocumentCard({ doc, onShare, onVerify, onManageAccess }:
           )}
 
           <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-            <button
-              className="btn-primary"
-              style={{ padding: "10px 18px", fontSize: 13 }}
-              onClick={(e) => {
-                e.stopPropagation();
-                onShare(doc);
-              }}
-            >
-              <Send size={13} style={{ marginRight: 6, verticalAlign: "middle" }} />
-              Share
-            </button>
+            {onShare && (
+              <button
+                className="btn-primary"
+                style={{ padding: "10px 18px", fontSize: 13 }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onShare(doc);
+                }}
+              >
+                <Send size={13} style={{ marginRight: 6, verticalAlign: "middle" }} />
+                Share
+              </button>
+            )}
 
             {/* Manage Access — only show if document has been shared */}
             {doc.sharedWith.length > 0 && onManageAccess && (

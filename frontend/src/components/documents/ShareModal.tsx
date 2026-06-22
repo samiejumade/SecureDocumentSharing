@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Send, Eye, FileText, Shield, CheckCircle, AlertTriangle, Mail } from "lucide-react";
+import { Send, Eye, FileText, Shield, CheckCircle, AlertTriangle, Mail, Copy, Check } from "lucide-react";
 import Modal from "@/components/ui/Modal";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
@@ -25,6 +25,9 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
   const [error, setError] = useState("");
   const [txHash, setTxHash] = useState("");
   const [emailSent, setEmailSent] = useState(false);
+  const [emailError, setEmailError] = useState("");
+  const [magicLink, setMagicLink] = useState("");
+  const [linkCopied, setLinkCopied] = useState(false);
 
   if (!document) return null;
 
@@ -59,6 +62,8 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
     setIsSharing(true);
     setError("");
     setEmailSent(false);
+    setEmailError("");
+    setMagicLink("");
 
     let currentTxHash = "";
 
@@ -101,6 +106,8 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
       // Send magic link email if email was provided
       if (recipientEmail) {
         const token = buildMagicToken();
+        const fullLink = `${window.location.origin}/share/${token}`;
+        setMagicLink(fullLink);
         try {
           const res = await fetch("/api/share", {
             method: "POST",
@@ -117,11 +124,10 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
           if (data.success) {
             setEmailSent(true);
           } else {
-            console.warn("Email send failed:", data.error);
-            // Don't block the share flow for email failures
+            setEmailError(data.error || "Email delivery failed");
           }
-        } catch (emailErr) {
-          console.warn("Email send error:", emailErr);
+        } catch (emailErr: any) {
+          setEmailError(emailErr?.message || "Email delivery failed");
           // Continue — the on-chain grant already succeeded
         }
       }
@@ -134,8 +140,11 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
         setAccessLevel(1);
         setTxHash("");
         setEmailSent(false);
+        setEmailError("");
+        setMagicLink("");
+        setLinkCopied(false);
         onClose();
-      }, 3500);
+      }, emailError ? 8000 : 3500); // keep open longer if email failed
     } catch (e: any) {
       setError(e?.message || "Failed to grant access");
     } finally {
@@ -321,6 +330,77 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
             >
               <Mail size={14} />
               Magic link emailed successfully!
+            </div>
+          )}
+
+          {/* Email failure fallback — show copyable link */}
+          {emailError && magicLink && (
+            <div
+              style={{
+                padding: "14px 16px",
+                borderRadius: 14,
+                background: "rgba(251,113,133,0.06)",
+                border: "1px solid rgba(251,113,133,0.2)",
+                marginBottom: 16,
+                textAlign: "left",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "var(--accent-red)",
+                  marginBottom: 8,
+                }}
+              >
+                <AlertTriangle size={14} />
+                Email delivery failed — share this link manually
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-muted)",
+                  wordBreak: "break-all",
+                  background: "rgba(0,0,0,0.2)",
+                  borderRadius: 8,
+                  padding: "8px 10px",
+                  fontFamily: "monospace",
+                  marginBottom: 10,
+                  lineHeight: 1.5,
+                }}
+              >
+                {magicLink}
+              </div>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(magicLink).then(() => {
+                    setLinkCopied(true);
+                    setTimeout(() => setLinkCopied(false), 2500);
+                  });
+                }}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  background: linkCopied ? "rgba(52,211,153,0.1)" : "rgba(255,255,255,0.05)",
+                  border: `1px solid ${linkCopied ? "rgba(52,211,153,0.25)" : "var(--border-subtle)"}`,
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: linkCopied ? "var(--accent-emerald)" : "var(--text-secondary)",
+                  transition: "all 0.2s ease",
+                }}
+              >
+                {linkCopied ? <Check size={13} /> : <Copy size={13} />}
+                {linkCopied ? "Copied!" : "Copy Magic Link"}
+              </button>
             </div>
           )}
 

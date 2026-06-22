@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Upload, Shield, Send, Search, Filter } from "lucide-react";
+import { Upload, Shield, Send, Search, Filter, Users } from "lucide-react";
 import dynamic from "next/dynamic";
 import GlassCard from "@/components/ui/GlassCard";
 import Button from "@/components/ui/Button";
@@ -138,6 +138,14 @@ export default function DocumentsPage() {
     return matchesSearch && matchesType;
   });
 
+  // Split: docs I own vs docs shared with me
+  const myDocs = filteredDocs.filter(
+    (d) => !wallet || d.ownerAddress.toLowerCase() === wallet.address.toLowerCase()
+  );
+  const sharedWithMeDocs = filteredDocs.filter(
+    (d) => wallet && d.ownerAddress.toLowerCase() !== wallet.address.toLowerCase()
+  );
+
   return (
     <div className="fade-in">
       {/* Header */}
@@ -210,9 +218,9 @@ export default function DocumentsPage() {
         )}
       </GlassCard>
 
-      {/* Document List */}
+      {/* My Documents */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 700 }}>Secured Documents</h2>
+        <h2 style={{ fontSize: 18, fontWeight: 700 }}>My Documents</h2>
         <div style={{ display: "flex", gap: 10 }}>
           {/* Search */}
           <div style={{ position: "relative" }}>
@@ -266,9 +274,9 @@ export default function DocumentsPage() {
         </div>
       </div>
 
-      {filteredDocs.length > 0 ? (
+      {myDocs.length > 0 ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {filteredDocs.map((doc) => (
+          {myDocs.map((doc) => (
             <DocumentCard
               key={doc.id}
               doc={doc}
@@ -288,6 +296,54 @@ export default function DocumentsPage() {
             </p>
           </div>
         </GlassCard>
+      )}
+
+      {/* Shared With Me */}
+      {sharedWithMeDocs.length > 0 && (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 32, marginBottom: 16 }}>
+            <Users size={18} color="var(--accent-copper)" />
+            <h2 style={{ fontSize: 18, fontWeight: 700 }}>Shared With Me</h2>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                padding: "2px 8px",
+                borderRadius: 6,
+                background: "rgba(251,146,60,0.1)",
+                border: "1px solid rgba(251,146,60,0.2)",
+                color: "var(--accent-copper)",
+              }}
+            >
+              {sharedWithMeDocs.length}
+            </span>
+          </div>
+          <div
+            style={{
+              padding: "10px 14px",
+              borderRadius: 12,
+              background: "rgba(251,146,60,0.04)",
+              border: "1px solid rgba(251,146,60,0.1)",
+              fontSize: 12,
+              color: "var(--text-muted)",
+              marginBottom: 16,
+              lineHeight: 1.6,
+            }}
+          >
+            <Shield size={12} style={{ verticalAlign: "middle", marginRight: 6, color: "var(--accent-copper)" }} />
+            These documents were shared with you via magic link. You can download and view them based on your granted access level.
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {sharedWithMeDocs.map((doc) => (
+              <DocumentCard
+                key={doc.id}
+                doc={doc}
+                onShare={undefined}
+                onManageAccess={undefined}
+              />
+            ))}
+          </div>
+        </>
       )}
 
       {/* Share Modal */}

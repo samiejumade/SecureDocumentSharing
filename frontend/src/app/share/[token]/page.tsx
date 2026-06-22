@@ -15,10 +15,19 @@ import {
   Save,
   X,
   Ban,
+  Key,
+  Copy,
+  Check,
 } from "lucide-react";
 import { useParams } from "next/navigation";
 import GlassCard from "@/components/ui/GlassCard";
 import Button from "@/components/ui/Button";
+import {
+  saveDocument,
+  getDocuments,
+  generateId,
+  type StoredDocument,
+} from "@/lib/store";
 
 /** Decoded payload from the base64 magic link token */
 interface TokenPayload {
@@ -69,6 +78,40 @@ const ACCESS_CONFIG: Record<
   },
 };
 
+/** Save the shared document into recipient's localStorage so it appears in their dashboard */
+function importSharedDocument(payload: TokenPayload): boolean {
+  try {
+    const existing = getDocuments();
+    const alreadyImported = existing.some(
+      (d) => d.docHash === payload.docHash && d.status === "shared"
+    );
+    if (alreadyImported) return false;
+
+    const doc: StoredDocument = {
+      id: generateId(),
+      name: payload.docName,
+      size: 0,
+      sizeFormatted: "—",
+      docHash: payload.docHash,
+      cid: payload.cid,
+      encKeyHex: payload.encKeyHex || "",
+      ownerAddress: payload.sender,
+      docType: "business",
+      createdAt: payload.sharedAt,
+      txHash: "",
+      status: "shared",
+      expiry: 0,
+      ipTimestamp: false,
+      sharedWith: [],
+    };
+
+    saveDocument(doc);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export default function ShareViewPage() {
   const params = useParams();
   const token = params?.token as string;
@@ -78,6 +121,9 @@ export default function ShareViewPage() {
   const [error, setError] = useState("");
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState("");
+  const [docImported, setDocImported] = useState(false);
+  const [keyWarningDismissed, setKeyWarningDismissed] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   // Edit & Sign state
   const [showEditor, setShowEditor] = useState(false);
@@ -112,6 +158,12 @@ export default function ShareViewPage() {
           // If verification API is down, we still allow access
           // (fail-open for demo; production would fail-closed)
         }
+      }
+
+      // Auto-import the document into recipient's localStorage dashboard
+      if (payload) {
+        const imported = importSharedDocument(payload);
+        setDocImported(imported);
       }
 
       setVerified(true);
@@ -217,6 +269,14 @@ export default function ShareViewPage() {
   const handleSaveAnnotations = () => {
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  /** Copy magic link to clipboard */
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(window.location.href).then(() => {
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2500);
+    });
   };
 
   return (
@@ -373,6 +433,73 @@ export default function ShareViewPage() {
         {!loading && verified && !accessRevoked && (
           <GlassCard padding={32} hoverable={false}>
             <div className="fade-in">
+
+              {/* ── AES KEY SECURITY WARNING BANNER ── */}
+              {!keyWarningDismissed && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 12,
+                    padding: "14px 16px",
+                    borderRadius: 14,
+                    background: "rgba(251,191,36,0.07)",
+                    border: "1px solid rgba(251,191,36,0.25)",
+                    marginBottom: 20,
+                  }}
+                >
+                  <Key size={16} color="#fbbf24" style={{ marginTop: 2, flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#fbbf24", marginBottom: 4 }}>
+                      Security Notice — Encryption Key in URL
+                    </div>
+                    <div style={{ fontSize: 12, color: "#d4a520", lineHeight: 1.6 }}>
+                      This magic link embeds the AES-256 decryption key directly in the URL.
+                      Anyone with this link can decrypt and download the document.
+                      <strong style={{ display: "block", marginTop: 4, color: "#fbbf24" }}>
+                        ⚠ For production use, keys must be wrapped with the recipient&apos;s
+                        public key (asymmetric encryption). Do not share this URL further.
+                      </strong>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setKeyWarningDismissed(true)}
+                    title="Dismiss"
+                    style={{
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "#fbbf24",
+                      padding: 2,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+
+              {/* ── IMPORTED NOTICE ── */}
+              {docImported && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "10px 14px",
+                    borderRadius: 12,
+                    background: "rgba(52,211,153,0.05)",
+                    border: "1px solid rgba(52,211,153,0.12)",
+                    marginBottom: 16,
+                    fontSize: 12,
+                    color: "var(--accent-emerald)",
+                  }}
+                >
+                  <CheckCircle size={13} />
+                  Document added to your dashboard — visible under &quot;Shared With Me&quot;.
+                </div>
+              )}
+
               {/* Verification badge */}
               <div
                 style={{
@@ -758,6 +885,31 @@ export default function ShareViewPage() {
                   )}
                 </div>
               )}
+
+              {/* Copy link */}
+              <div style={{ marginBottom: 12 }}>
+                <button
+                  onClick={handleCopyLink}
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    padding: "9px 14px",
+                    borderRadius: 10,
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid var(--border-subtle)",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    color: linkCopied ? "var(--accent-emerald)" : "var(--text-secondary)",
+                    transition: "all 0.2s ease",
+                  }}
+                >
+                  {linkCopied ? <Check size={13} /> : <Copy size={13} />}
+                  {linkCopied ? "Link copied!" : "Copy magic link"}
+                </button>
+              </div>
 
               {/* Security footer */}
               <div
