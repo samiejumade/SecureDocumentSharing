@@ -1,19 +1,19 @@
 /* ─────────────────────────────────────────────────
    SecureDocChain — Share API Route
-   Sends a magic link email via Resend when a
-   document is shared with another user.
+   Sends a magic link email via Gmail SMTP (Nodemailer)
+   when a document is shared with another user.
 
-   RESEND FREE TIER NOTE:
-   Without a verified custom domain, emails can only
-   be sent to the Resend account owner's email.
-   Add a verified domain in resend.com/domains and
-   set RESEND_FROM_EMAIL=noreply@yourdomain.com
+   SETUP REQUIRED:
+   1. Enable 2-Step Verification on your Google account
+   2. Go to: myaccount.google.com/apppasswords
+   3. Create an App Password (select "Mail" + "Other")
+   4. Add these to your env vars:
+        GMAIL_USER=youremail@gmail.com
+        GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
    ───────────────────────────────────────────────── */
 
 import { NextRequest, NextResponse } from "next/server";
-import { Resend } from "resend";
-
-const resend = new Resend(process.env.RESEND_KEY || "");
+import nodemailer from "nodemailer";
 
 export async function POST(req: NextRequest) {
   try {
@@ -24,8 +24,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    if (!process.env.RESEND_KEY) {
-      return NextResponse.json({ error: "RESEND_KEY not configured" }, { status: 500 });
+    // Validate Gmail credentials are configured
+    const gmailUser = process.env.GMAIL_USER;
+    const gmailPass = process.env.GMAIL_APP_PASSWORD;
+
+    if (!gmailUser || !gmailPass) {
+      console.error("[share/route] Gmail credentials not configured:", {
+        hasUser: !!gmailUser,
+        hasPass: !!gmailPass,
+      });
+      return NextResponse.json(
+        { error: "Email service not configured. GMAIL_USER and GMAIL_APP_PASSWORD are required." },
+        { status: 500 }
+      );
     }
 
     const accessLabel =
@@ -37,8 +48,21 @@ export async function POST(req: NextRequest) {
 
     const magicLink = `${req.nextUrl.origin}/share/${token}`;
 
-    // Resend sender — defaults to onboarding@resend.dev for free tier
-    const fromEmail = process.env.RESEND_FROM_EMAIL || "SecureDocChain <onboarding@resend.dev>";
+    console.log("[share/route] Sending email via Gmail SMTP");
+    console.log("[share/route] From:", gmailUser, "→ To:", recipientEmail);
+
+    // Create Gmail SMTP transporter
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: gmailUser,
+        pass: gmailPass, // This is the App Password, NOT your Gmail login password
+      },
+    });
+
+    // Verify the transporter is correctly configured before sending
+    await transporter.verify();
+    console.log("[share/route] SMTP connection verified ✓");
 
     const htmlContent = `
 <!DOCTYPE html>
@@ -95,8 +119,13 @@ export async function POST(req: NextRequest) {
                 </tr>
               </table>
 
+              <!-- Magic Link fallback -->
+              <p style="margin:20px 0 0;font-size:12px;color:#4a5a7a;word-break:break-all;">
+                Or copy this link: <a href="${magicLink}" style="color:#22d3ee;">${magicLink}</a>
+              </p>
+
               <!-- Security Note -->
-              <p style="margin:28px 0 0;padding:14px 16px;background:rgba(99,102,241,0.04);border:1px solid rgba(99,102,241,0.08);border-radius:12px;font-size:12px;color:#8b9ec7;line-height:1.7;">
+              <p style="margin:20px 0 0;padding:14px 16px;background:rgba(99,102,241,0.04);border:1px solid rgba(99,102,241,0.08);border-radius:12px;font-size:12px;color:#8b9ec7;line-height:1.7;">
                 &#128274; This document is end-to-end encrypted. Your access is logged immutably on the Polygon blockchain. No wallet required to view.
               </p>
             </td>
@@ -120,60 +149,29 @@ export async function POST(req: NextRequest) {
 
     const textContent = `A document "${documentName}" has been shared with you on SecureDocChain.\n\nAccess Level: ${accessLabel}\nShared By: ${senderAddress || "Anonymous"}\n\nOpen your secure document: ${magicLink}\n\nThis document is end-to-end encrypted and your access is logged on the Polygon blockchain.`;
 
-    console.log("[share/route] Sending email via Resend to:", recipientEmail);
-    console.log("[share/route] From address:", fromEmail);
-    console.log("[share/route] RESEND_KEY present:", !!process.env.RESEND_KEY);
-
-    const response = await resend.emails.send({
-      from: fromEmail,
+    const info = await transporter.sendMail({
+      from: `"SecureDocChain" <${gmailUser}>`,
       to: recipientEmail,
       subject: `📄 A document has been shared with you — ${documentName}`,
       html: htmlContent,
       text: textContent,
     });
 
-    // Log full Resend response for debugging
-    console.log("[share/route] Resend raw response:", JSON.stringify(response));
-
-    if (response.error) {
-      // Surface the exact Resend error so the client UI can show it
-      const resendError = response.error as any;
-      const errorMessage =
-        resendError?.message ||
-        resendError?.name ||
-        "Resend rejected the email";
-
-      console.error("[share/route] Resend error object:", JSON.stringify(resendError));
-
-      // Friendly message for the most common free-tier restriction
-      const isSandboxRestriction =
-        errorMessage.toLowerCase().includes("verify") ||
-        errorMessage.toLowerCase().includes("domain") ||
-        errorMessage.toLowerCase().includes("testing") ||
-        resendError?.name === "validation_error";
-
-      return NextResponse.json(
-        {
-          success: false,
-          error: isSandboxRestriction
-            ? `Email restricted: Resend free tier only allows sending to the account owner's email. Add a verified domain at resend.com/domains to send to any address. Magic link: ${magicLink}`
-            : `Resend error: ${errorMessage}`,
-          magicLink,
-        },
-        { status: 422 }
-      );
-    }
-
-    console.log("[share/route] Email sent successfully. ID:", response.data?.id);
+    console.log("[share/route] Email sent successfully. MessageId:", info.messageId);
 
     return NextResponse.json({
       success: true,
-      id: response.data?.id,
+      messageId: info.messageId,
     });
   } catch (e: any) {
-    console.error("[share/route] Unexpected exception:", e?.message, e?.stack);
+    console.error("[share/route] Error:", e?.message, e?.code);
     return NextResponse.json(
-      { error: e?.message || "Failed to send email" },
+      {
+        error:
+          e?.code === "EAUTH"
+            ? "Gmail authentication failed. Check GMAIL_USER and GMAIL_APP_PASSWORD in your environment variables."
+            : e?.message || "Failed to send email",
+      },
       { status: 500 }
     );
   }
