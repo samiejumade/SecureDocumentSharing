@@ -1,7 +1,13 @@
 /* ─────────────────────────────────────────────────
    SecureDocChain — Share API Route
-   Sends a magic link email via MailerSend when a
+   Sends a magic link email via Resend when a
    document is shared with another user.
+
+   RESEND FREE TIER NOTE:
+   Without a verified custom domain, emails can only
+   be sent to the Resend account owner's email.
+   Add a verified domain in resend.com/domains and
+   set RESEND_FROM_EMAIL=noreply@yourdomain.com
    ───────────────────────────────────────────────── */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -114,6 +120,10 @@ export async function POST(req: NextRequest) {
 
     const textContent = `A document "${documentName}" has been shared with you on SecureDocChain.\n\nAccess Level: ${accessLabel}\nShared By: ${senderAddress || "Anonymous"}\n\nOpen your secure document: ${magicLink}\n\nThis document is end-to-end encrypted and your access is logged on the Polygon blockchain.`;
 
+    console.log("[share/route] Sending email via Resend to:", recipientEmail);
+    console.log("[share/route] From address:", fromEmail);
+    console.log("[share/route] RESEND_KEY present:", !!process.env.RESEND_KEY);
+
     const response = await resend.emails.send({
       from: fromEmail,
       to: recipientEmail,
@@ -122,16 +132,46 @@ export async function POST(req: NextRequest) {
       text: textContent,
     });
 
+    // Log full Resend response for debugging
+    console.log("[share/route] Resend raw response:", JSON.stringify(response));
+
     if (response.error) {
-      throw new Error(response.error.message || "Failed to send email");
+      // Surface the exact Resend error so the client UI can show it
+      const resendError = response.error as any;
+      const errorMessage =
+        resendError?.message ||
+        resendError?.name ||
+        "Resend rejected the email";
+
+      console.error("[share/route] Resend error object:", JSON.stringify(resendError));
+
+      // Friendly message for the most common free-tier restriction
+      const isSandboxRestriction =
+        errorMessage.toLowerCase().includes("verify") ||
+        errorMessage.toLowerCase().includes("domain") ||
+        errorMessage.toLowerCase().includes("testing") ||
+        resendError?.name === "validation_error";
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: isSandboxRestriction
+            ? `Email restricted: Resend free tier only allows sending to the account owner's email. Add a verified domain at resend.com/domains to send to any address. Magic link: ${magicLink}`
+            : `Resend error: ${errorMessage}`,
+          magicLink,
+        },
+        { status: 422 }
+      );
     }
+
+    console.log("[share/route] Email sent successfully. ID:", response.data?.id);
 
     return NextResponse.json({
       success: true,
       id: response.data?.id,
     });
   } catch (e: any) {
-    console.error("Share API error:", e);
+    console.error("[share/route] Unexpected exception:", e?.message, e?.stack);
     return NextResponse.json(
       { error: e?.message || "Failed to send email" },
       { status: 500 }

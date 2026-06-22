@@ -141,18 +141,27 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
               senderAddress: wallet?.address || "Unknown",
             }),
           });
-          const data = await res.json();
+
+          // Safely parse JSON — the server might return non-JSON on a crash
+          let data: any = {};
+          try {
+            data = await res.json();
+          } catch {
+            data = { error: `Server error (HTTP ${res.status}) — no details available` };
+          }
+
           if (data.success) {
             setEmailSent(true);
           } else {
             hasEmailError = true;
-            setEmailError(data.error || "Email delivery failed");
+            setEmailError(data.error || `Email delivery failed (HTTP ${res.status})`);
           }
         } catch (emailErr: any) {
           hasEmailError = true;
-          setEmailError(emailErr?.message || "Email delivery failed");
+          setEmailError(emailErr?.message || "Network error — could not reach email API");
           // Continue — the on-chain grant already succeeded
         }
+
       }
 
       setShareSuccess(true);
