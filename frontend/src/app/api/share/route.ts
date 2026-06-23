@@ -1,20 +1,14 @@
 /* ─────────────────────────────────────────────────
    SecureDocChain — Share API Route
-   Sends a magic link email via Brevo (HTTP REST API)
-   No custom domain needed. Works on Vercel serverless.
-
-   SETUP:
-   1. Sign up free at brevo.com
-   2. Go to: brevo.com → SMTP & API → API Keys → Generate
-   3. Go to: brevo.com → Senders & IP → Add a Sender
-      (any email, e.g. your Gmail — verify via link)
-   4. Add to Vercel env vars:
-        BREVO_API_KEY=xkeysib-...
-        BREVO_FROM_EMAIL=your_verified@email.com
-        BREVO_FROM_NAME=SecureDocChain
+   Sends a magic link email when a document is shared.
+   
+   Supports two email delivery backends:
+   1. Gmail SMTP (using secure port 465 SSL, allowed on Vercel)
+   2. Brevo HTTP API (as fallback/alternative)
    ───────────────────────────────────────────────── */
 
 import { NextRequest, NextResponse } from "next/server";
+import nodemailer from "nodemailer";
 
 export async function POST(req: NextRequest) {
   try {
@@ -25,30 +19,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    const brevoApiKey = process.env.BREVO_API_KEY;
-    const fromEmail   = process.env.BREVO_FROM_EMAIL;
-    const fromName    = process.env.BREVO_FROM_NAME || "SecureDocChain";
-
-    if (!brevoApiKey || !fromEmail) {
-      console.error("[share/route] Brevo credentials missing:", {
-        hasKey:   !!brevoApiKey,
-        hasEmail: !!fromEmail,
-      });
-      return NextResponse.json(
-        { error: "Email service not configured. Add BREVO_API_KEY and BREVO_FROM_EMAIL to environment variables." },
-        { status: 500 }
-      );
-    }
-
     const accessLabel =
       accessLevel === 3 ? "Full Access (Sign & Modify)"
       : accessLevel === 2 ? "Edit Access"
       : "View Only";
 
     const magicLink = `${req.nextUrl.origin}/share/${token}`;
-
-    console.log("[share/route] Sending via Brevo HTTP API");
-    console.log("[share/route] From:", fromEmail, "→ To:", recipientEmail);
 
     const htmlContent = `
 <!DOCTYPE html>
@@ -122,42 +98,92 @@ export async function POST(req: NextRequest) {
 
     const textContent = `A document "${documentName}" has been shared with you on SecureDocChain.\n\nAccess Level: ${accessLabel}\nShared By: ${senderAddress || "Anonymous"}\n\nOpen your secure document: ${magicLink}\n\nThis document is end-to-end encrypted and your access is logged on the Polygon blockchain.`;
 
-    // ── Brevo REST API call (pure HTTP, no SMTP, works on Vercel) ──
-    const brevoResponse = await fetch("https://api.brevo.com/v3/smtp/email", {
-      method: "POST",
-      headers: {
-        "accept":       "application/json",
-        "api-key":      brevoApiKey,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        sender:  { name: fromName, email: fromEmail },
-        to:      [{ email: recipientEmail }],
-        subject: `📄 A document has been shared with you — ${documentName}`,
-        htmlContent,
-        textContent,
-      }),
-    });
+    // ── BACKEND 1: Gmail SMTP (port 465 SSL, not blocked by Vercel) ──
+    const gmailUser = process.env.GMAIL_USER;
+    const gmailPass = process.env.GMAIL_APP_PASSWORD;
 
-    const brevoData = await brevoResponse.json().catch(() => ({}));
-    console.log("[share/route] Brevo response status:", brevoResponse.status);
-    console.log("[share/route] Brevo response body:", JSON.stringify(brevoData));
+    if (gmailUser && gmailPass) {
+      console.log("[share/route] Found Gmail SMTP configuration. Trying send...");
+      try {
+        const transporter = nodemailer.createTransport({
+          host: "smtp.gmail.com",
+          port: 465,
+          secure: true, // SSL
+          auth: {
+            user: gmailUser,
+            pass: gmailPass,
+          },
+          connectionTimeout: 8000,
+          socketTimeout: 8000,
+        });
 
-    if (!brevoResponse.ok) {
-      const errorMsg = (brevoData as any)?.message || `Brevo error (HTTP ${brevoResponse.status})`;
-      console.error("[share/route] Brevo rejected the request:", errorMsg);
-      return NextResponse.json(
-        { success: false, error: `Email delivery failed: ${errorMsg}` },
-        { status: 422 }
-      );
+        await transporter.verify();
+        const info = await transporter.sendMail({
+          from: `"SecureDocChain" <${gmailUser}>`,
+          to: recipientEmail,
+          subject: `📄 A document has been shared with you — ${documentName}`,
+          html: htmlContent,
+          text: textContent,
+        });
+
+        console.log("[share/route] Gmail SMTP send success. MessageId:", info.messageId);
+        return NextResponse.json({
+          success: true,
+          provider: "gmail",
+          messageId: info.messageId,
+        });
+      } catch (gmailErr: any) {
+        console.error("[share/route] Gmail SMTP failed, will check if Brevo is available:", gmailErr.message);
+      }
     }
 
-    console.log("[share/route] Email sent successfully. MessageId:", (brevoData as any)?.messageId);
+    // ── BACKEND 2: Brevo HTTP REST API (Fallback) ──
+    const brevoApiKey = process.env.BREVO_API_KEY;
+    const fromEmail   = process.env.BREVO_FROM_EMAIL;
+    const fromName    = process.env.BREVO_FROM_NAME || "SecureDocChain";
 
-    return NextResponse.json({
-      success: true,
-      messageId: (brevoData as any)?.messageId,
-    });
+    if (brevoApiKey && fromEmail) {
+      console.log("[share/route] Found Brevo API configuration. Trying send...");
+      const brevoResponse = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "accept":       "application/json",
+          "api-key":      brevoApiKey,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          sender:  { name: fromName, email: fromEmail },
+          to:      [{ email: recipientEmail }],
+          subject: `📄 A document has been shared with you — ${documentName}`,
+          htmlContent,
+          textContent,
+        }),
+      });
+
+      const brevoData = await brevoResponse.json().catch(() => ({}));
+      
+      if (brevoResponse.ok) {
+        console.log("[share/route] Brevo send success. MessageId:", brevoData.messageId);
+        return NextResponse.json({
+          success: true,
+          provider: "brevo",
+          messageId: brevoData.messageId,
+        });
+      } else {
+        const errorMsg = brevoData?.message || `Brevo error (HTTP ${brevoResponse.status})`;
+        console.error("[share/route] Brevo send failed:", errorMsg);
+        return NextResponse.json(
+          { success: false, error: `Email delivery failed: ${errorMsg}` },
+          { status: 422 }
+        );
+      }
+    }
+
+    // Neither service is configured or working
+    return NextResponse.json(
+      { error: "No active email service found. Configure GMAIL_USER/GMAIL_APP_PASSWORD or activate your Brevo account." },
+      { status: 500 }
+    );
 
   } catch (e: any) {
     console.error("[share/route] Unexpected error:", e?.message, e?.stack);
