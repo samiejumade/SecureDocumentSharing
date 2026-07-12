@@ -17,6 +17,7 @@ export interface StoredDocument {
   cid: string;              // IPFS CID
   encKeyHex: string;        // AES key (hex) — owner-only
   ownerAddress: string;
+  recipientAddress?: string;
   docType: DocType;
   createdAt: string;        // ISO timestamp
   txHash: string;           // Polygon tx hash

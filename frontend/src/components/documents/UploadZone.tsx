@@ -15,9 +15,25 @@ export default function UploadZone({ onFileSelected, selectedFile, onClear, disa
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const ALLOWED_EXTENSIONS = ["pdf", "doc", "docx", "txt", "png", "jpg", "jpeg"];
+  const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+
   const handleFile = useCallback(
     (file: File) => {
-      if (!disabled) onFileSelected(file);
+      if (disabled) return;
+
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      if (!ext || !ALLOWED_EXTENSIONS.includes(ext)) {
+        alert(`Invalid file type. Allowed formats: ${ALLOWED_EXTENSIONS.join(", ").toUpperCase()}`);
+        return;
+      }
+
+      if (file.size > MAX_FILE_SIZE) {
+        alert("File size exceeds the 50MB limit for secure client-side encryption.");
+        return;
+      }
+
+      onFileSelected(file);
     },
     [onFileSelected, disabled]
   );

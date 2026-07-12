@@ -23,9 +23,9 @@ export const polygonAmoy = {
 } as const satisfies AppKitNetwork;
 
 /* ── Project ID from Reown Cloud ──────────────── */
-export const projectId = process.env.NEXT_PUBLIC_REOWN_PROJECT_ID || "";
+export const projectId = process.env.NEXT_PUBLIC_REOWN_PROJECT_ID || "00000000000000000000000000000000";
 
-if (!projectId) {
+if (projectId === "00000000000000000000000000000000") {
   console.warn("NEXT_PUBLIC_REOWN_PROJECT_ID not set — wallet modal will not work");
 }
 

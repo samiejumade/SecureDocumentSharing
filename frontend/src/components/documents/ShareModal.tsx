@@ -50,7 +50,7 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
 
   /**
    * Build a base64 token that the recipient page can decode.
-   * Contains: documentName, docHash, accessLevel, senderAddress, sharedAt
+   * Contains: documentName, docHash, accessLevel, senderAddress, sharedAt, and recipientAddress
    */
   function buildMagicToken(): string {
     const payload = {
@@ -62,6 +62,7 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
       sharedAt: new Date().toISOString(),
       // Include the AES key so the recipient can decrypt
       encKeyHex: document!.encKeyHex,
+      recipientAddress: recipientAddress.toLowerCase(),
     };
     // URL-safe base64
     return btoa(JSON.stringify(payload))
@@ -71,8 +72,8 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
   }
 
   const handleShare = async () => {
-    if (!recipientAddress && !recipientEmail) {
-      setError("Please provide a wallet address or email");
+    if (!recipientAddress) {
+      setError("Recipient Wallet Address is mandatory for on-chain identity authorization.");
       return;
     }
 
@@ -90,23 +91,18 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
     let currentTxHash = "";
 
     try {
-      // If wallet is connected, do on-chain grant
-      if (wallet && recipientAddress) {
+      // Must do real on-chain grant using recipient wallet address
+      if (wallet) {
         const result = await grantDocumentAccess(document.docHash, recipientAddress, accessLevel);
         currentTxHash = result.txHash;
       } else {
-        // Simulated for email-only shares (would go through backend in production)
-        currentTxHash =
-          "0x" +
-          Array.from({ length: 64 }, () =>
-            Math.floor(Math.random() * 16).toString(16)
-          ).join("");
+        throw new Error("Your wallet is not connected. Wallet connection is mandatory to grant access on-chain.");
       }
       setTxHash(currentTxHash);
 
       // Update local store
       addSharedAccess(document.id, {
-        address: recipientAddress || "pending",
+        address: recipientAddress.toLowerCase(),
         email: recipientEmail || undefined,
         level: accessLevel,
         grantedAt: new Date().toISOString(),
@@ -300,8 +296,9 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
                 A magic link email will be sent to <strong>{recipientEmail}</strong>.
               </>
             ) : (
-              " The recipient gets a secure magic link — no wallet required."
+              " Share the magic link below with the recipient."
             )}
+            {" The recipient must connect their Web3 wallet to decrypt and view."}
           </div>
 
           {/* Error */}
