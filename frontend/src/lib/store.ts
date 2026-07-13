@@ -94,20 +94,70 @@ export function updateDocumentStatus(id: string, status: DocStatus): void {
 export function addSharedAccess(docId: string, access: SharedAccess): void {
   const doc = getDocumentById(docId);
   if (doc) {
-    doc.sharedWith.push(access);
+    // Update owner's document
+    const alreadyShared = doc.sharedWith.some((s) => s.address.toLowerCase() === access.address.toLowerCase());
+    if (!alreadyShared) {
+      doc.sharedWith.push(access);
+    }
     doc.status = "shared";
     saveDocument(doc);
+
+    // Create a copy for the recipient in local storage
+    const allDocs = getDocuments();
+    const recipientAddressLower = access.address.toLowerCase();
+    const alreadyImported = allDocs.some(
+      (d) =>
+        d.docHash === doc.docHash &&
+        d.recipientAddress?.toLowerCase() === recipientAddressLower &&
+        d.status !== "revoked"
+    );
+
+    if (!alreadyImported) {
+      const recipientDoc: StoredDocument = {
+        id: generateId(),
+        name: doc.name,
+        size: doc.size,
+        sizeFormatted: doc.sizeFormatted,
+        docHash: doc.docHash,
+        cid: doc.cid,
+        encKeyHex: doc.encKeyHex, // shared key
+        ownerAddress: doc.ownerAddress.toLowerCase(),
+        recipientAddress: recipientAddressLower,
+        docType: doc.docType,
+        createdAt: access.grantedAt,
+        txHash: access.txHash,
+        status: "shared",
+        expiry: doc.expiry,
+        ipTimestamp: doc.ipTimestamp,
+        sharedWith: [],
+        accessLevel: access.level,
+      };
+      saveDocument(recipientDoc);
+    }
   }
 }
 
 export function removeSharedAccess(docId: string, address: string): void {
   const doc = getDocumentById(docId);
   if (doc) {
-    doc.sharedWith = doc.sharedWith.filter((s) => s.address !== address);
+    // Remove from owner's list
+    doc.sharedWith = doc.sharedWith.filter((s) => s.address.toLowerCase() !== address.toLowerCase());
     if (doc.sharedWith.length === 0) {
       doc.status = "anchored";
     }
     saveDocument(doc);
+
+    // Find and update the recipient's copy to revoked status
+    const allDocs = getDocuments();
+    const recipientDoc = allDocs.find(
+      (d) =>
+        d.docHash === doc.docHash &&
+        d.recipientAddress?.toLowerCase() === address.toLowerCase()
+    );
+    if (recipientDoc) {
+      recipientDoc.status = "revoked";
+      saveDocument(recipientDoc);
+    }
   }
 }
 

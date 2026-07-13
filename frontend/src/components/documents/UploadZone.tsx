@@ -15,7 +15,7 @@ export default function UploadZone({ onFileSelected, selectedFile, onClear, disa
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const ALLOWED_EXTENSIONS = ["pdf", "doc", "docx", "txt", "png", "jpg", "jpeg"];
+  const ALLOWED_EXTENSIONS = ["pdf", "doc", "docx", "txt", "xlsx", "pptx", "zip", "png", "jpg", "jpeg"];
   const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
   const handleFile = useCallback(
@@ -133,14 +133,14 @@ export default function UploadZone({ onFileSelected, selectedFile, onClear, disa
         ref={fileInputRef}
         onChange={onFileInput}
         style={{ display: "none" }}
-        accept=".pdf,.docx,.doc,.txt,.xlsx,.pptx,.png,.jpg,.jpeg,.zip"
+        accept=".pdf,.doc,.docx,.txt,.xlsx,.pptx,.zip,.png,.jpg,.jpeg"
       />
       <Upload size={36} color="var(--accent-teal)" style={{ marginBottom: 16 }} />
       <p style={{ fontSize: 16, fontWeight: 600, marginBottom: 6, color: "var(--text-primary)" }}>
         Drag & drop your document here
       </p>
       <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
-        or click to browse · PDF, DOCX, TXT, XLSX up to 500 MB
+        or click to browse · PDF, DOC, DOCX, TXT, XLSX, PPTX, ZIP, PNG, JPG, JPEG up to 50 MB
       </p>
       <div
         style={{

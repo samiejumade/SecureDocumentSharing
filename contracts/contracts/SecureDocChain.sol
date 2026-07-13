@@ -145,6 +145,22 @@ contract SecureDocChain is Ownable, Pausable {
         emit DocumentUpdated(_dh, _newCid, d.version, d.keyVersion, block.timestamp);
     }
 
+    /**
+     * @notice Revoke access for a user without changing the IPFS CID.
+     * @param _dh      Document hash
+     * @param _user    User whose access is being revoked
+     */
+    function revokeAccess(bytes32 _dh, address _user) external whenNotPaused {
+        require(documents[_dh].owner == msg.sender, "Not owner");
+        Document storage d = documents[_dh];
+        d.accessLevel[_user] = 0;
+        d.version   += 1;
+        d.keyVersion += 1;
+        d.timestamp  = block.timestamp;
+        emit AccessRevoked(_dh, _user, d.keyVersion, block.timestamp);
+        emit DocumentUpdated(_dh, d.ipfsCID, d.version, d.keyVersion, block.timestamp);
+    }
+
     // ── Access Logging ──────────────────────────────
 
     /**
@@ -188,8 +204,19 @@ contract SecureDocChain is Ownable, Pausable {
      * @notice Check a user's access level for a document.
      * @return level 0=none, 1=view, 2=edit, 3=sign
      */
-    function getAccessLevel(bytes32 _dh, address _user) external view returns (uint8 level) {
+    function getAccessLevel(bytes32 _dh, address _user) public view returns (uint8 level) {
         return documents[_dh].accessLevel[_user];
+    }
+
+    /**
+     * @notice Check if a user has access and return their access level.
+     */
+    function hasAccess(bytes32 _dh, address _user) external view returns (bool, uint8) {
+        uint8 level = getAccessLevel(_dh, _user);
+        if (documents[_dh].expiry > 0 && block.timestamp > documents[_dh].expiry) {
+            return (false, 0);
+        }
+        return (level > 0, level);
     }
 
     /**

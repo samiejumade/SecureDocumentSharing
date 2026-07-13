@@ -48,6 +48,16 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
 
   if (!document) return null;
 
+  const readBindings = (): Record<string, string> => {
+    if (typeof window === "undefined") return {};
+    try {
+      const raw = localStorage.getItem("sdc_email_bindings");
+      return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    } catch {
+      return {};
+    }
+  };
+
   /**
    * Build a base64 token that the recipient page can decode.
    * Contains: documentName, docHash, accessLevel, senderAddress, sharedAt, and recipientAddress
@@ -75,6 +85,19 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
     if (!recipientAddress) {
       setError("Recipient Wallet Address is mandatory for on-chain identity authorization.");
       return;
+    }
+
+    if (recipientEmail) {
+      const emailKey = recipientEmail.toLowerCase().trim();
+      const bindings = readBindings();
+
+      const existingBinding = bindings[emailKey];
+      if (existingBinding && existingBinding.toLowerCase() !== recipientAddress.toLowerCase().trim()) {
+        setError(
+          `Security Validation: Email is already bound to wallet address: [${existingBinding}]. You must share with the linked wallet address.`
+        );
+        return;
+      }
     }
 
     setIsSharing(true);
@@ -258,9 +281,8 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
                   transition: "all 0.2s ease",
                   background:
                     accessLevel === lvl.value ? "rgba(34,211,238,0.08)" : "rgba(255,255,255,0.03)",
-                  border: `1px solid ${
-                    accessLevel === lvl.value ? "rgba(34,211,238,0.25)" : "var(--border-subtle)"
-                  }`,
+                  border: `1px solid ${accessLevel === lvl.value ? "rgba(34,211,238,0.25)" : "var(--border-subtle)"
+                    }`,
                   color: accessLevel === lvl.value ? "var(--accent-teal)" : "var(--text-secondary)",
                 }}
               >

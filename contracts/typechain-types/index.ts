@@ -8,5 +8,7 @@ export type { contracts };
 export * as factories from "./factories";
 export type { Ownable } from "./@openzeppelin/contracts/access/Ownable";
 export { Ownable__factory } from "./factories/@openzeppelin/contracts/access/Ownable__factory";
+export type { Pausable } from "./@openzeppelin/contracts/utils/Pausable";
+export { Pausable__factory } from "./factories/@openzeppelin/contracts/utils/Pausable__factory";
 export type { SecureDocChain } from "./contracts/SecureDocChain";
 export { SecureDocChain__factory } from "./factories/contracts/SecureDocChain__factory";

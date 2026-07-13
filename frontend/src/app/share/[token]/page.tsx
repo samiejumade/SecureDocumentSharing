@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import {
   Shield,
   FileText,
@@ -140,6 +141,81 @@ export function ShareViewContent() {
   const [keyWarningDismissed, setKeyWarningDismissed] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [isBlurry, setIsBlurry] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isMouseInside, setIsMouseInside] = useState(false);
+  const [viewerLabel, setViewerLabel] = useState("unknown viewer");
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const handleCopyField = (text: string, field: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(null), 1500);
+    });
+  };
+
+  useEffect(() => {
+    const address = wallet?.address?.toLowerCase();
+    if (!address) {
+      setViewerLabel("unknown viewer");
+      return;
+    }
+    const bindingsRaw = typeof window !== "undefined" ? localStorage.getItem("sdc_email_bindings") : null;
+    let bindings: Record<string, string> = {};
+    try {
+      bindings = bindingsRaw ? JSON.parse(bindingsRaw) : {};
+    } catch {}
+    const email = Object.keys(bindings).find(
+      (k) => bindings[k].toLowerCase() === address
+    );
+    if (email) {
+      setViewerLabel(`${wallet.address} (${email})`);
+    } else {
+      setViewerLabel(wallet.address);
+    }
+  }, [wallet?.address]);
+
+  useEffect(() => {
+    if (toastMessage) {
+      const timer = setTimeout(() => setToastMessage(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
+
+  const buildWatermarkSvg = (viewer: string, tokenVal: string, hash: string) => {
+    const escViewer = viewer.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const cellW = 320;
+    const cellH = 180;
+    const halfW = 160;
+    const halfH = 90;
+    const closeStyle = "</" + "style>";
+    const closeSvg = "</" + "svg>";
+    const closeG = "</" + "g>";
+    const svg = `
+      <svg xmlns='http://www.w3.org/2000/svg' width='${cellW}' height='${cellH}'>
+        <style>
+          .wm-txt {
+            fill: rgba(34, 211, 238, 0.07);
+            font-size: 9px;
+            font-family: monospace;
+            text-anchor: middle;
+            text-shadow: 1px 1px 1px rgba(0,0,0,0.8), -1px -1px 1px rgba(0,0,0,0.8);
+          }
+        ${closeStyle}
+        <g transform='translate(${halfW}, ${halfH})'>
+          <text class='wm-txt' transform='rotate(-25)'>${escViewer}</text>
+          <text class='wm-txt' y='14' transform='rotate(-25)'>IPFS: ${tokenVal.slice(0, 10)}... Hash: ${hash.slice(0, 10)}...</text>
+          <text class='wm-txt' y='28' transform='rotate(-25)'>${new Date().toLocaleString()}</text>
+          
+          <text class='wm-txt' transform='rotate(25)'>${escViewer}</text>
+          <text class='wm-txt' y='14' transform='rotate(25)'>IPFS: ${tokenVal.slice(0, 10)}... Hash: ${hash.slice(0, 10)}...</text>
+          <text class='wm-txt' y='28' transform='rotate(25)'>${new Date().toLocaleString()}</text>
+        ${closeG}
+      ${closeSvg}
+    `;
+    const mime = "image" + "/" + "svg+xml";
+    return `data:${mime};utf8,${encodeURIComponent(svg)}`;
+  };
 
   // Edit & Sign state
   const [showEditor, setShowEditor] = useState(false);
@@ -216,30 +292,56 @@ export function ShareViewContent() {
 
   const accessLevel = payload?.level || 1;
 
-  // Global screenshot and keyboard print/save blocker for View-Only documents
+  // Global screenshot and keyboard print/save blocker for all documents
   useEffect(() => {
-    if (accessLevel !== 1 || !verified) return;
+    if (!showPreview) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const isCmdOrCtrl = e.metaKey || e.ctrlKey;
-      if (isCmdOrCtrl && (e.key === "p" || e.key === "s" || e.key === "P" || e.key === "S")) {
-        e.preventDefault();
-        alert("Saving or printing is disabled for View-Only documents.");
-      }
 
-      if (e.key === "PrintScreen" || e.key === "Screenshot" || e.key === "Meta" || e.key === "OS") {
+      // Block print, save, copy, and inspect
+      if (isCmdOrCtrl && (e.key === "p" || e.key === "P" || e.key === "s" || e.key === "S" || e.key === "c" || e.key === "C")) {
         e.preventDefault();
         setIsBlurry(true);
-        alert("Screenshots are disabled for this workspace.");
+        setToastMessage("Printing, saving, and copying are disabled for security.");
+      }
+
+      // Block standard screenshot keys
+      if (e.key === "PrintScreen" || e.key === "Snapshot" || e.key === "Meta" || e.key === "OS" || e.key === "ContextMenu") {
+        e.preventDefault();
+        setIsBlurry(true);
+        setToastMessage("Screenshots are disabled.");
+      }
+
+      // Block macOS screenshot combinations: Cmd+Shift+3, Cmd+Shift+4, Cmd+Shift+5
+      if (e.metaKey && e.shiftKey && (e.key === "3" || e.key === "4" || e.key === "5")) {
+        e.preventDefault();
+        setIsBlurry(true);
+        setToastMessage("macOS Screen Capture blocked.");
+      }
+
+      // Block Windows Snipping tool: Win+Shift+S
+      if (e.metaKey && e.shiftKey && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        setIsBlurry(true);
+        setToastMessage("Windows Screen Capture blocked.");
+      }
+
+      // Block Inspect element keyboard triggers: F12, Ctrl+Shift+I, Ctrl+Shift+C, Ctrl+Shift+J
+      if (e.key === "F12" || (isCmdOrCtrl && e.shiftKey && (e.key === "i" || e.key === "I" || e.key === "c" || e.key === "C" || e.key === "j" || e.key === "J"))) {
+        e.preventDefault();
+        setIsBlurry(true);
+        setToastMessage("Developer Tools blocked.");
       }
     };
 
     const handleBlur = () => {
       setIsBlurry(true);
+      setToastMessage("Focus lost. View blocked.");
     };
 
     const handleFocus = () => {
-      setIsBlurry(false);
+      // Keep it blurry until they explicitly click the resume button to prevent quick-screenshot capture
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -251,7 +353,7 @@ export function ShareViewContent() {
       window.removeEventListener("blur", handleBlur);
       window.removeEventListener("focus", handleFocus);
     };
-  }, [accessLevel, verified]);
+  }, [showPreview]);
   const access = ACCESS_CONFIG[accessLevel] || ACCESS_CONFIG[1];
   const docName = payload?.docName || "Shared_Document.pdf";
   const senderAddr = payload?.sender || "Unknown";
@@ -530,6 +632,18 @@ export function ShareViewContent() {
         padding: "40px 20px",
       }}
     >
+      {/* Premium Page-Blur Wrapping Wrapper */}
+      <div
+        style={{
+          filter: showPreview ? "blur(12px) brightness(0.6)" : "none",
+          transition: "filter 0.3s ease, transform 0.3s ease",
+          width: "100%",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
       {/* Dynamic print-prevention styles */}
       {accessLevel === 1 && (
         <style>
@@ -1432,6 +1546,7 @@ export function ShareViewContent() {
             </div>
           </GlassCard>
         )}
+      </div>
       </div>
     </div>
   );

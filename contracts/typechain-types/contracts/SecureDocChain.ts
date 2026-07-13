@@ -27,15 +27,25 @@ export interface SecureDocChainInterface extends Interface {
   getFunction(
     nameOrSignature:
       | "accessLog"
+      | "batchGrantAccess"
       | "createDocument"
+      | "documentExists"
       | "documents"
+      | "getAccessLevel"
+      | "getAccessLog"
       | "getDocumentState"
       | "grantAccess"
+      | "hasAccess"
       | "logAccess"
       | "owner"
+      | "pause"
+      | "paused"
       | "renounceOwnership"
-      | "revokeAccess"
+      | "revokeAccess(bytes32,address,string)"
+      | "revokeAccess(bytes32,address)"
       | "transferOwnership"
+      | "unpause"
+      | "updateDocument"
       | "verifyIntegrity"
   ): FunctionFragment;
 
@@ -47,6 +57,8 @@ export interface SecureDocChainInterface extends Interface {
       | "DocumentCreated"
       | "DocumentUpdated"
       | "OwnershipTransferred"
+      | "Paused"
+      | "Unpaused"
   ): EventFragment;
 
   encodeFunctionData(
@@ -54,11 +66,27 @@ export interface SecureDocChainInterface extends Interface {
     values: [BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
+    functionFragment: "batchGrantAccess",
+    values: [BytesLike, AddressLike[], BigNumberish[]]
+  ): string;
+  encodeFunctionData(
     functionFragment: "createDocument",
     values: [BytesLike, string, string, BigNumberish, boolean]
   ): string;
   encodeFunctionData(
+    functionFragment: "documentExists",
+    values: [BytesLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "documents",
+    values: [BytesLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "getAccessLevel",
+    values: [BytesLike, AddressLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "getAccessLog",
     values: [BytesLike]
   ): string;
   encodeFunctionData(
@@ -70,21 +98,36 @@ export interface SecureDocChainInterface extends Interface {
     values: [BytesLike, AddressLike, BigNumberish]
   ): string;
   encodeFunctionData(
+    functionFragment: "hasAccess",
+    values: [BytesLike, AddressLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "logAccess",
     values: [BytesLike]
   ): string;
   encodeFunctionData(functionFragment: "owner", values?: undefined): string;
+  encodeFunctionData(functionFragment: "pause", values?: undefined): string;
+  encodeFunctionData(functionFragment: "paused", values?: undefined): string;
   encodeFunctionData(
     functionFragment: "renounceOwnership",
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "revokeAccess",
+    functionFragment: "revokeAccess(bytes32,address,string)",
     values: [BytesLike, AddressLike, string]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "revokeAccess(bytes32,address)",
+    values: [BytesLike, AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "transferOwnership",
     values: [AddressLike]
+  ): string;
+  encodeFunctionData(functionFragment: "unpause", values?: undefined): string;
+  encodeFunctionData(
+    functionFragment: "updateDocument",
+    values: [BytesLike, string]
   ): string;
   encodeFunctionData(
     functionFragment: "verifyIntegrity",
@@ -93,10 +136,26 @@ export interface SecureDocChainInterface extends Interface {
 
   decodeFunctionResult(functionFragment: "accessLog", data: BytesLike): Result;
   decodeFunctionResult(
+    functionFragment: "batchGrantAccess",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "createDocument",
     data: BytesLike
   ): Result;
+  decodeFunctionResult(
+    functionFragment: "documentExists",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(functionFragment: "documents", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "getAccessLevel",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "getAccessLog",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(
     functionFragment: "getDocumentState",
     data: BytesLike
@@ -105,18 +164,30 @@ export interface SecureDocChainInterface extends Interface {
     functionFragment: "grantAccess",
     data: BytesLike
   ): Result;
+  decodeFunctionResult(functionFragment: "hasAccess", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "logAccess", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "owner", data: BytesLike): Result;
+  decodeFunctionResult(functionFragment: "pause", data: BytesLike): Result;
+  decodeFunctionResult(functionFragment: "paused", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "renounceOwnership",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "revokeAccess",
+    functionFragment: "revokeAccess(bytes32,address,string)",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "revokeAccess(bytes32,address)",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
     functionFragment: "transferOwnership",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(functionFragment: "unpause", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "updateDocument",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -265,6 +336,30 @@ export namespace OwnershipTransferredEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
+export namespace PausedEvent {
+  export type InputTuple = [account: AddressLike];
+  export type OutputTuple = [account: string];
+  export interface OutputObject {
+    account: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace UnpausedEvent {
+  export type InputTuple = [account: AddressLike];
+  export type OutputTuple = [account: string];
+  export interface OutputObject {
+    account: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
 export interface SecureDocChain extends BaseContract {
   connect(runner?: ContractRunner | null): SecureDocChain;
   waitForDeployment(): Promise<this>;
@@ -314,6 +409,12 @@ export interface SecureDocChain extends BaseContract {
     "view"
   >;
 
+  batchGrantAccess: TypedContractMethod<
+    [_dh: BytesLike, _users: AddressLike[], _levels: BigNumberish[]],
+    [void],
+    "nonpayable"
+  >;
+
   createDocument: TypedContractMethod<
     [
       _docHash: BytesLike,
@@ -325,6 +426,8 @@ export interface SecureDocChain extends BaseContract {
     [void],
     "nonpayable"
   >;
+
+  documentExists: TypedContractMethod<[_dh: BytesLike], [boolean], "view">;
 
   documents: TypedContractMethod<
     [arg0: BytesLike],
@@ -343,14 +446,26 @@ export interface SecureDocChain extends BaseContract {
     "view"
   >;
 
+  getAccessLevel: TypedContractMethod<
+    [_dh: BytesLike, _user: AddressLike],
+    [bigint],
+    "view"
+  >;
+
+  getAccessLog: TypedContractMethod<[_dh: BytesLike], [string[]], "view">;
+
   getDocumentState: TypedContractMethod<
     [_dh: BytesLike],
     [
-      [string, bigint, bigint, bigint] & {
+      [string, string, bigint, bigint, bigint, string, bigint, boolean] & {
         cid: string;
+        owner: string;
         version: bigint;
         keyVersion: bigint;
+        timestamp: bigint;
+        docType: string;
         expiry: bigint;
+        ipTimestamp: boolean;
       }
     ],
     "view"
@@ -362,20 +477,44 @@ export interface SecureDocChain extends BaseContract {
     "nonpayable"
   >;
 
+  hasAccess: TypedContractMethod<
+    [_dh: BytesLike, _user: AddressLike],
+    [[boolean, bigint]],
+    "view"
+  >;
+
   logAccess: TypedContractMethod<[_dh: BytesLike], [void], "nonpayable">;
 
   owner: TypedContractMethod<[], [string], "view">;
 
+  pause: TypedContractMethod<[], [void], "nonpayable">;
+
+  paused: TypedContractMethod<[], [boolean], "view">;
+
   renounceOwnership: TypedContractMethod<[], [void], "nonpayable">;
 
-  revokeAccess: TypedContractMethod<
+  "revokeAccess(bytes32,address,string)": TypedContractMethod<
     [_dh: BytesLike, _user: AddressLike, _newCid: string],
+    [void],
+    "nonpayable"
+  >;
+
+  "revokeAccess(bytes32,address)": TypedContractMethod<
+    [_dh: BytesLike, _user: AddressLike],
     [void],
     "nonpayable"
   >;
 
   transferOwnership: TypedContractMethod<
     [newOwner: AddressLike],
+    [void],
+    "nonpayable"
+  >;
+
+  unpause: TypedContractMethod<[], [void], "nonpayable">;
+
+  updateDocument: TypedContractMethod<
+    [_dh: BytesLike, _newCid: string],
     [void],
     "nonpayable"
   >;
@@ -398,6 +537,13 @@ export interface SecureDocChain extends BaseContract {
     "view"
   >;
   getFunction(
+    nameOrSignature: "batchGrantAccess"
+  ): TypedContractMethod<
+    [_dh: BytesLike, _users: AddressLike[], _levels: BigNumberish[]],
+    [void],
+    "nonpayable"
+  >;
+  getFunction(
     nameOrSignature: "createDocument"
   ): TypedContractMethod<
     [
@@ -410,6 +556,9 @@ export interface SecureDocChain extends BaseContract {
     [void],
     "nonpayable"
   >;
+  getFunction(
+    nameOrSignature: "documentExists"
+  ): TypedContractMethod<[_dh: BytesLike], [boolean], "view">;
   getFunction(
     nameOrSignature: "documents"
   ): TypedContractMethod<
@@ -429,15 +578,29 @@ export interface SecureDocChain extends BaseContract {
     "view"
   >;
   getFunction(
+    nameOrSignature: "getAccessLevel"
+  ): TypedContractMethod<
+    [_dh: BytesLike, _user: AddressLike],
+    [bigint],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "getAccessLog"
+  ): TypedContractMethod<[_dh: BytesLike], [string[]], "view">;
+  getFunction(
     nameOrSignature: "getDocumentState"
   ): TypedContractMethod<
     [_dh: BytesLike],
     [
-      [string, bigint, bigint, bigint] & {
+      [string, string, bigint, bigint, bigint, string, bigint, boolean] & {
         cid: string;
+        owner: string;
         version: bigint;
         keyVersion: bigint;
+        timestamp: bigint;
+        docType: string;
         expiry: bigint;
+        ipTimestamp: boolean;
       }
     ],
     "view"
@@ -450,24 +613,54 @@ export interface SecureDocChain extends BaseContract {
     "nonpayable"
   >;
   getFunction(
+    nameOrSignature: "hasAccess"
+  ): TypedContractMethod<
+    [_dh: BytesLike, _user: AddressLike],
+    [[boolean, bigint]],
+    "view"
+  >;
+  getFunction(
     nameOrSignature: "logAccess"
   ): TypedContractMethod<[_dh: BytesLike], [void], "nonpayable">;
   getFunction(
     nameOrSignature: "owner"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
+    nameOrSignature: "pause"
+  ): TypedContractMethod<[], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "paused"
+  ): TypedContractMethod<[], [boolean], "view">;
+  getFunction(
     nameOrSignature: "renounceOwnership"
   ): TypedContractMethod<[], [void], "nonpayable">;
   getFunction(
-    nameOrSignature: "revokeAccess"
+    nameOrSignature: "revokeAccess(bytes32,address,string)"
   ): TypedContractMethod<
     [_dh: BytesLike, _user: AddressLike, _newCid: string],
     [void],
     "nonpayable"
   >;
   getFunction(
+    nameOrSignature: "revokeAccess(bytes32,address)"
+  ): TypedContractMethod<
+    [_dh: BytesLike, _user: AddressLike],
+    [void],
+    "nonpayable"
+  >;
+  getFunction(
     nameOrSignature: "transferOwnership"
   ): TypedContractMethod<[newOwner: AddressLike], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "unpause"
+  ): TypedContractMethod<[], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "updateDocument"
+  ): TypedContractMethod<
+    [_dh: BytesLike, _newCid: string],
+    [void],
+    "nonpayable"
+  >;
   getFunction(
     nameOrSignature: "verifyIntegrity"
   ): TypedContractMethod<[_dh: BytesLike, _cid: string], [boolean], "view">;
@@ -513,6 +706,20 @@ export interface SecureDocChain extends BaseContract {
     OwnershipTransferredEvent.InputTuple,
     OwnershipTransferredEvent.OutputTuple,
     OwnershipTransferredEvent.OutputObject
+  >;
+  getEvent(
+    key: "Paused"
+  ): TypedContractEvent<
+    PausedEvent.InputTuple,
+    PausedEvent.OutputTuple,
+    PausedEvent.OutputObject
+  >;
+  getEvent(
+    key: "Unpaused"
+  ): TypedContractEvent<
+    UnpausedEvent.InputTuple,
+    UnpausedEvent.OutputTuple,
+    UnpausedEvent.OutputObject
   >;
 
   filters: {
@@ -580,6 +787,28 @@ export interface SecureDocChain extends BaseContract {
       OwnershipTransferredEvent.InputTuple,
       OwnershipTransferredEvent.OutputTuple,
       OwnershipTransferredEvent.OutputObject
+    >;
+
+    "Paused(address)": TypedContractEvent<
+      PausedEvent.InputTuple,
+      PausedEvent.OutputTuple,
+      PausedEvent.OutputObject
+    >;
+    Paused: TypedContractEvent<
+      PausedEvent.InputTuple,
+      PausedEvent.OutputTuple,
+      PausedEvent.OutputObject
+    >;
+
+    "Unpaused(address)": TypedContractEvent<
+      UnpausedEvent.InputTuple,
+      UnpausedEvent.OutputTuple,
+      UnpausedEvent.OutputObject
+    >;
+    Unpaused: TypedContractEvent<
+      UnpausedEvent.InputTuple,
+      UnpausedEvent.OutputTuple,
+      UnpausedEvent.OutputObject
     >;
   };
 }

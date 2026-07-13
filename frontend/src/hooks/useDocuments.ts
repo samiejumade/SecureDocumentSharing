@@ -30,7 +30,7 @@ export function useDocuments() {
     const filtered = allDocs.filter((d) => {
       const isOwner = d.ownerAddress.toLowerCase() === wallet.address.toLowerCase();
       const isRecipient = d.recipientAddress?.toLowerCase() === wallet.address.toLowerCase();
-      return isOwner || isRecipient;
+      return isOwner || (isRecipient && d.status !== "revoked");
     });
     setDocuments(filtered);
   }, [wallet]);

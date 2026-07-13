@@ -6,22 +6,136 @@ import { WalletProvider, useWallet } from "@/context/WalletContext";
 import { useAuth } from "@/context/AuthContext";
 import Button from "@/components/ui/Button";
 import GlassCard from "@/components/ui/GlassCard";
-import { Wallet, ShieldAlert } from "lucide-react";
-import { useEffect } from "react";
+import { Wallet, ShieldAlert, LogOut } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+
+const EMAIL_BINDINGS_KEY = "sdc_email_bindings";
+
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function normalizeAddress(address: string) {
+  return address.trim().toLowerCase();
+}
+
+function readBindings(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(EMAIL_BINDINGS_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeBindings(bindings: Record<string, string>) {
+  localStorage.setItem(EMAIL_BINDINGS_KEY, JSON.stringify(bindings));
+}
 
 function WalletGate({ children }: { children: React.ReactNode }) {
-  const { user, login } = useAuth();
-  const { wallet, connect, isConnecting } = useWallet();
+  const { user, login, logout } = useAuth();
+  const { wallet, connect, disconnect, isConnecting } = useWallet();
+  const [bindings, setBindings] = useState<Record<string, string>>({});
 
-  // Link wallet address to session once connected
   useEffect(() => {
-    if (user && user.loginMethod === "email" && wallet?.address && user.walletAddress !== wallet.address) {
-      login({
-        ...user,
-        walletAddress: wallet.address,
-      });
+    setBindings(readBindings());
+  }, []);
+
+  useEffect(() => {
+    if (!user?.email || !wallet?.address) return;
+
+    const emailKey = normalizeEmail(user.email);
+    const walletAddress = normalizeAddress(wallet.address);
+    const boundAddress = bindings[emailKey];
+
+    if (!boundAddress) {
+      const nextBindings = { ...bindings, [emailKey]: walletAddress };
+      writeBindings(nextBindings);
+      setBindings(nextBindings);
+      if (user.walletAddress !== wallet.address) {
+        login({ ...user, walletAddress: wallet.address });
+      }
+      return;
     }
-  }, [user, wallet, login]);
+
+    if (normalizeAddress(boundAddress) !== walletAddress) {
+      return;
+    }
+
+    if (user.walletAddress !== wallet.address) {
+      login({ ...user, walletAddress: wallet.address });
+    }
+  }, [user, wallet, login, bindings]);
+
+  const conflict = useMemo(() => {
+    if (!user?.email || !wallet?.address) return null;
+    const bound = bindings[normalizeEmail(user.email)];
+    if (!bound) return null;
+    if (normalizeAddress(bound) === normalizeAddress(wallet.address)) return null;
+    return {
+      email: user.email,
+      boundAddress: bound,
+    };
+  }, [user, wallet, bindings]);
+
+  const handleDisconnect = () => {
+    disconnect();
+  };
+
+  const handleSignOut = () => {
+    disconnect();
+    logout();
+  };
+
+  if (conflict) {
+    return (
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 9999,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "rgba(10, 14, 26, 0.92)",
+          backdropFilter: "blur(18px)",
+          padding: 24,
+        }}
+      >
+        <GlassCard padding={44} style={{ maxWidth: 560, width: "100%", textAlign: "center" }}>
+          <div
+            style={{
+              width: 72,
+              height: 72,
+              borderRadius: 20,
+              background: "rgba(251, 113, 133, 0.08)",
+              border: "1px solid rgba(251, 113, 133, 0.2)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              margin: "0 auto 24px",
+              color: "var(--accent-red)",
+            }}
+          >
+            <ShieldAlert size={34} />
+          </div>
+          <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 12 }}>Wallet Binding Conflict</h2>
+          <p style={{ fontSize: 14, color: "var(--text-secondary)", marginBottom: 24, lineHeight: 1.7 }}>
+            This email ([${conflict.email}]) is already bound to wallet address: [${conflict.boundAddress}]. You must connect with the linked wallet address to continue.
+          </p>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+            <Button variant="secondary" onClick={handleDisconnect} icon={<Wallet size={16} />}>
+              Disconnect Wallet
+            </Button>
+            <Button variant="primary" onClick={handleSignOut} icon={<LogOut size={16} />}>
+              Sign Out
+            </Button>
+          </div>
+        </GlassCard>
+      </div>
+    );
+  }
 
   // If logged in via email but wallet is not connected, show gate
   if (user?.loginMethod === "email" && !wallet) {
