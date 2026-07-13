@@ -4,8 +4,34 @@ import { PinataSDK } from "pinata";
 export async function POST(request: NextRequest) {
   try {
     const jwt = process.env.NEXT_PUBLIC_PINATA_JWT;
-    if (!jwt) {
-      return NextResponse.json({ error: "Pinata JWT not configured" }, { status: 500 });
+    if (!jwt || jwt === "your_pinata_jwt_token" || jwt.startsWith("your_")) {
+      console.warn("Pinata JWT not configured. Using Mock IPFS Upload fallback for local development.");
+      
+      const formData = await request.formData();
+      const file = formData.get("file") as File;
+      const fileName = formData.get("fileName") as string;
+
+      if (!file) {
+        return NextResponse.json({ error: "No file provided" }, { status: 400 });
+      }
+
+      // Generate a mock CID
+      const mockCid = "Qm" + Array.from({ length: 44 }, () =>
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".charAt(
+          Math.floor(Math.random() * 62)
+        )
+      ).join("");
+
+      // Simulate a small network delay
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      return NextResponse.json({
+        cid: mockCid,
+        fileName: fileName || file.name,
+        size: file.size,
+        timestamp: new Date().toISOString(),
+        isMock: true,
+      });
     }
 
     const pinata = new PinataSDK({

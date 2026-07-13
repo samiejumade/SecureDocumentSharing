@@ -178,15 +178,19 @@ export async function grantDocumentAccess(
 }
 
 /**
- * Revoke access and re-encrypt with a new CID.
+ * Revoke access for a user. Supports both overloaded functions:
+ * - revokeAccess(bytes32,address)
+ * - revokeAccess(bytes32,address,string)
  */
 export async function revokeDocumentAccess(
   docHash: string,
   userAddress: string,
-  newCid: string
+  newCid?: string
 ): Promise<GrantResult> {
   const contract = await getContract();
-  const tx = await contract.revokeAccess(docHash, userAddress, newCid, getAmoyGasOverrides());
+  const tx = newCid
+    ? await contract.revokeAccess(docHash, userAddress, newCid, getAmoyGasOverrides())
+    : await contract.revokeAccess(docHash, userAddress, getAmoyGasOverrides());
   const receipt = await tx.wait(1);
 
   return {
@@ -230,6 +234,15 @@ export async function getDocumentState(docHash: string) {
 export async function getAccessLevel(docHash: string, userAddress: string): Promise<number> {
   const contract = await getReadContract();
   return Number(await contract.getAccessLevel(docHash, userAddress));
+}
+
+export async function hasAccess(docHash: string, userAddress: string): Promise<{ hasAccess: boolean; level: number }> {
+  const contract = await getReadContract();
+  const result = await contract.hasAccess(docHash, userAddress);
+  return {
+    hasAccess: result[0] as boolean,
+    level: Number(result[1]),
+  };
 }
 
 export async function getAccessLog(docHash: string): Promise<string[]> {

@@ -34,7 +34,6 @@ export default function LoginPage() {
   const [walletLoading, setWalletLoading] = useState(false);
   const [activeVertical, setActiveVertical] = useState<Vertical>("vault");
   const [error, setError] = useState("");
-  const [magicLinkSent, setMagicLinkSent] = useState(false);
 
   const handleEmailLogin = async () => {
     if (!loginEmail) {
@@ -43,42 +42,34 @@ export default function LoginPage() {
     }
     setLoginLoading(true);
     setError("");
-    setMagicLinkSent(false);
 
     try {
       // Store vertical choice
       localStorage.setItem("sdc_vertical", activeVertical);
 
-      // Build the magic link token
-      const token = buildLoginToken(loginEmail);
+      // Create session directly (no magic link click required)
+      setSession({
+        email: loginEmail,
+        loginMethod: "email",
+        authenticatedAt: new Date().toISOString(),
+        sessionToken: generateAuthToken(),
+      });
+      localStorage.setItem("sdc_user_email", loginEmail);
 
-      // Send magic link email via API
-      const res = await fetch("/api/auth/login", {
+      // Trigger the sign-in notification email in the background
+      fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: loginEmail, token }),
+        body: JSON.stringify({ email: loginEmail, type: "notification" }),
+      }).catch((e) => {
+        // Log error but do not block direct login
+        console.warn("Notification email trigger error:", e);
       });
 
-      const data = await res.json();
-
-      if (data.success) {
-        setMagicLinkSent(true);
-      } else {
-        // If email sending fails, fall back to direct login for demo
-        console.warn("Email send failed, falling back to direct login:", data.error);
-        // Create session directly for demo purposes
-        setSession({
-          email: loginEmail,
-          loginMethod: "email",
-          authenticatedAt: new Date().toISOString(),
-          sessionToken: generateAuthToken(),
-        });
-        localStorage.setItem("sdc_user_email", loginEmail);
-        router.push("/dashboard");
-      }
+      // Redirect immediately to dashboard
+      router.push("/dashboard");
     } catch (e: any) {
       setError(e?.message || "Login failed. Please try again.");
-    } finally {
       setLoginLoading(false);
     }
   };
@@ -116,91 +107,6 @@ export default function LoginPage() {
       setWalletLoading(false);
     }
   };
-
-  // Magic link sent — show confirmation
-  if (magicLinkSent) {
-    return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          minHeight: "100vh",
-          padding: "40px 20px",
-        }}
-      >
-        <div
-          className="glass-card fade-in"
-          style={{ padding: 44, maxWidth: 440, width: "100%", borderRadius: 28, textAlign: "center" }}
-        >
-          <div
-            style={{
-              width: 64,
-              height: 64,
-              borderRadius: "50%",
-              background: "rgba(34,211,238,0.08)",
-              border: "2px solid var(--accent-teal)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              margin: "0 auto 24px",
-            }}
-          >
-            <Mail size={28} color="var(--accent-teal)" />
-          </div>
-          <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 10 }}>Check Your Email</h2>
-          <p style={{ fontSize: 14, color: "var(--text-secondary)", marginBottom: 6, lineHeight: 1.7 }}>
-            We&apos;ve sent a magic sign-in link to
-          </p>
-          <p
-            style={{
-              fontSize: 16,
-              fontWeight: 600,
-              color: "var(--accent-teal)",
-              marginBottom: 24,
-            }}
-          >
-            {loginEmail}
-          </p>
-          <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6, marginBottom: 24 }}>
-            Click the link in the email to sign in. The link expires in 15 minutes.
-          </p>
-
-          <div
-            style={{
-              padding: "12px 16px",
-              borderRadius: 12,
-              background: "rgba(34,211,238,0.04)",
-              border: "1px solid rgba(34,211,238,0.1)",
-              fontSize: 12,
-              color: "var(--text-muted)",
-              lineHeight: 1.6,
-              marginBottom: 24,
-            }}
-          >
-            <CheckCircle size={13} style={{ verticalAlign: "middle", marginRight: 6, color: "var(--accent-emerald)" }} />
-            Didn&apos;t receive it? Check your spam folder or wait a minute.
-          </div>
-
-          <button
-            className="btn-secondary"
-            style={{ width: "100%", marginBottom: 12 }}
-            onClick={() => setMagicLinkSent(false)}
-          >
-            Try a different email
-          </button>
-          <button
-            className="btn-primary"
-            style={{ width: "100%" }}
-            onClick={handleEmailLogin}
-            disabled={loginLoading}
-          >
-            {loginLoading ? "Sending..." : "Resend Magic Link"}
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div
@@ -377,12 +283,12 @@ export default function LoginPage() {
                   animation: "shield-spin 0.8s linear infinite",
                 }}
               />
-              Sending Magic Link...
+              Creating Session...
             </>
           ) : (
             <>
               <LogIn size={16} />
-              Sign In with Magic Link
+              Sign In with Email
             </>
           )}
         </button>
@@ -448,7 +354,7 @@ export default function LoginPage() {
             lineHeight: 1.6,
           }}
         >
-          No wallet? No problem. Sign in with your email and we&apos;ll send you a secure magic link.
+          No wallet? No problem. Sign in with your email and we&apos;ll create your session immediately while sending a background notification.
         </p>
       </div>
     </div>

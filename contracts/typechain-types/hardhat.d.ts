@@ -18,6 +18,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.Ownable__factory>;
     getContractFactory(
+      name: "Pausable",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.Pausable__factory>;
+    getContractFactory(
       name: "SecureDocChain",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.SecureDocChain__factory>;
@@ -28,6 +32,11 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.Ownable>;
     getContractAt(
+      name: "Pausable",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.Pausable>;
+    getContractAt(
       name: "SecureDocChain",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -38,6 +47,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.Ownable>;
     deployContract(
+      name: "Pausable",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.Pausable>;
+    deployContract(
       name: "SecureDocChain",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.SecureDocChain>;
@@ -47,6 +60,11 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.Ownable>;
+    deployContract(
+      name: "Pausable",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.Pausable>;
     deployContract(
       name: "SecureDocChain",
       args: any[],

@@ -18,28 +18,26 @@ const metadata = {
 };
 
 /* ── Initialize AppKit (once) ─────────────────── */
-if (projectId) {
-  createAppKit({
-    adapters: [wagmiAdapter],
-    projectId,
-    networks,
-    defaultNetwork: polygonAmoy,
-    metadata,
-    features: {
-      analytics: false,
-      email: false,      // We handle email auth ourselves
-      socials: false,     // No social login via AppKit
-    },
-    themeMode: "dark",
-    themeVariables: {
-      "--w3m-accent": "#22d3ee",
-      "--w3m-color-mix": "#0a0e1a",
-      "--w3m-color-mix-strength": 50,
-      "--w3m-border-radius-master": "1px",
-      "--w3m-font-family": "'Outfit', system-ui, sans-serif",
-    },
-  });
-}
+createAppKit({
+  adapters: [wagmiAdapter],
+  projectId,
+  networks,
+  defaultNetwork: polygonAmoy,
+  metadata,
+  features: {
+    analytics: false,
+    email: false,      // We handle email auth ourselves
+    socials: false,     // No social login via AppKit
+  },
+  themeMode: "dark",
+  themeVariables: {
+    "--w3m-accent": "#22d3ee",
+    "--w3m-color-mix": "#0a0e1a",
+    "--w3m-color-mix-strength": 50,
+    "--w3m-border-radius-master": "1px",
+    "--w3m-font-family": "'Outfit', system-ui, sans-serif",
+  },
+});
 
 /* ── Provider Component ───────────────────────── */
 export default function Web3Provider({
