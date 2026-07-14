@@ -61,9 +61,9 @@ export default function DocumentCard({ doc, onShare, onVerify, onManageAccess }:
       (k) => bindings[k].toLowerCase() === address
     );
     if (email) {
-      setViewerLabel(`${wallet.address} (${email})`);
+      setViewerLabel(`${wallet?.address || ""} (${email})`);
     } else {
-      setViewerLabel(wallet.address);
+      setViewerLabel(wallet?.address || "");
     }
   }, [wallet?.address]);
 

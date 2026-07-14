@@ -87,17 +87,39 @@ export default function ShareModal({ isOpen, onClose, document }: ShareModalProp
       return;
     }
 
-    if (recipientEmail) {
-      const emailKey = recipientEmail.toLowerCase().trim();
-      const bindings = readBindings();
+    if (!recipientEmail) {
+      setError("Recipient Email is mandatory for magic link distribution.");
+      return;
+    }
 
-      const existingBinding = bindings[emailKey];
-      if (existingBinding && existingBinding.toLowerCase() !== recipientAddress.toLowerCase().trim()) {
-        setError(
-          `Security Validation: Email is already bound to wallet address: [${existingBinding}]. You must share with the linked wallet address.`
-        );
-        return;
-      }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(recipientEmail.trim())) {
+      setError("Please enter a valid recipient email address.");
+      return;
+    }
+
+    const emailKey = recipientEmail.toLowerCase().trim();
+    const targetAddress = recipientAddress.toLowerCase().trim();
+    const bindings = readBindings();
+
+    // Check 1: Is this email already bound to a different wallet?
+    const existingBinding = bindings[emailKey];
+    if (existingBinding && existingBinding.toLowerCase() !== targetAddress) {
+      setError(
+        `Security Validation: Email is already bound to wallet address: [${existingBinding}]. You must share with the linked wallet address.`
+      );
+      return;
+    }
+
+    // Check 2: Is this wallet already bound to a different email?
+    const boundEmail = Object.keys(bindings).find(
+      (k) => bindings[k].toLowerCase() === targetAddress
+    );
+    if (boundEmail && boundEmail.toLowerCase().trim() !== emailKey) {
+      setError(
+        `Security Validation: The wallet address [${recipientAddress}] is already bound to a different email: [${boundEmail}].`
+      );
+      return;
     }
 
     setIsSharing(true);
