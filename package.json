@@ -16,5 +16,10 @@
   },
   "engines": {
     "node": "20.x"
+  },
+  "devDependencies": {
+    "hardhat": "^2.28.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   }
 }

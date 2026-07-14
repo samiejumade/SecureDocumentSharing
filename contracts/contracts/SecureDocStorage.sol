@@ -38,10 +38,13 @@ abstract contract SecureDocStorage is Initializable {
 
     address internal _trustedForwarder;
 
+    // docHash => signer => signedStatus
+    mapping(bytes32 => mapping(address => bool)) internal hasSigned;
+
     /**
      * @dev Reserved storage slots for future state variable expansion.
      *      When adding a new variable, place it ABOVE this line and
      *      reduce the array size accordingly (e.g. uint256[48]).
      */
-    uint256[49] private __gap;
+    uint256[48] private __gap;
 }

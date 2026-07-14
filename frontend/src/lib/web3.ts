@@ -452,6 +452,38 @@ export async function documentExists(docHash: string): Promise<boolean> {
   }
 }
 
+export async function hasUserSigned(docHash: string, userAddress: string): Promise<boolean> {
+  try {
+    const contract = await getReadContract();
+    return await contract.hasUserSigned(docHash, userAddress);
+  } catch (err) {
+    console.warn("hasUserSigned failed:", err);
+    return false;
+  }
+}
+
+export async function signDocumentOnChain(docHash: string): Promise<GrantResult> {
+  const contract = await getContract();
+  const calldata = contract.interface.encodeFunctionData("signDocument", [docHash]);
+
+  try {
+    console.log("Attempting gasless signDocument transaction...");
+    const relayerResult = await sendGaslessTransaction(CONTRACT_ADDRESS, calldata);
+    return {
+      txHash: relayerResult.txHash,
+      explorerUrl: relayerResult.explorerUrl,
+    };
+  } catch (relayerError: any) {
+    console.warn("Gasless signDocument failed, falling back to direct transaction:", relayerError);
+    const tx = await contract.signDocument(docHash, getAmoyGasOverrides());
+    const receipt = await tx.wait(1);
+    return {
+      txHash: receipt.hash,
+      explorerUrl: `https://amoy.polygonscan.com/tx/${receipt.hash}`,
+    };
+  }
+}
+
 /* ── Utility ───────────────────────────────────── */
 
 export function generateDocHash(fileName: string, cid: string): string {

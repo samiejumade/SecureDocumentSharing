@@ -55,6 +55,11 @@ contract SecureDocChain is
         address indexed accessor,
         uint256 ts
     );
+    event DocumentSigned(
+        bytes32 indexed docHash,
+        address indexed signer,
+        uint256 ts
+    );
 
     // ── Constructor (disables initializers on implementation) ────
 
@@ -275,6 +280,28 @@ contract SecureDocChain is
         }
         accessLog[_dh].push(_msgSender());
         emit DocumentAccessed(_dh, _msgSender(), block.timestamp);
+    }
+
+    /**
+     * @notice Cryptographically sign and approve a document on-chain.
+     * @param _dh Document hash to sign
+     */
+    function signDocument(bytes32 _dh) external whenNotPaused {
+        require(
+            documents[_dh].owner == _msgSender() || 
+            documents[_dh].accessLevel[_msgSender()] >= 3,
+            "Unauthorized to sign"
+        );
+        require(!hasSigned[_dh][_msgSender()], "Already signed");
+        hasSigned[_dh][_msgSender()] = true;
+        emit DocumentSigned(_dh, _msgSender(), block.timestamp);
+    }
+
+    /**
+     * @notice Helper view function to check if a user has signed a document on-chain.
+     */
+    function hasUserSigned(bytes32 _dh, address _user) external view returns (bool) {
+        return hasSigned[_dh][_user];
     }
 
     // ── View Functions ──────────────────────────────

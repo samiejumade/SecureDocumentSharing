@@ -2,10 +2,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { FileText, Send, Eye, ExternalLink, Users, Shield, Clock, Download, Lock, Loader2, X, AlertTriangle, CheckCircle, Copy, Check } from "lucide-react";
+import { FileText, Send, Eye, ExternalLink, Users, Shield, Clock, Download, Lock, Loader2, X, AlertTriangle, CheckCircle, Copy, Check, RefreshCw } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
+import { useAuth } from "@/context/AuthContext";
 import Badge from "@/components/ui/Badge";
 import type { StoredDocument } from "@/lib/store";
+import { getDocumentComments, addDocumentComment, getDocumentSignatures, signDocumentLocally, hasUserSignedLocally, type Comment, type SignatureRecord } from "@/lib/comments";
+import { hasUserSigned, signDocumentOnChain, shortenAddress } from "@/lib/web3";
+import PDFCanvasViewer from "./PDFCanvasViewer";
 
 interface DocumentCardProps {
   doc: StoredDocument;
@@ -20,6 +24,7 @@ export default function DocumentCard({ doc, onShare, onVerify, onManageAccess }:
   const [downloadError, setDownloadError] = useState("");
 
   const { wallet } = useWallet();
+  const { user } = useAuth();
   const [showPreview, setShowPreview] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewText, setPreviewText] = useState<string | null>(null);
@@ -38,6 +43,279 @@ export default function DocumentCard({ doc, onShare, onVerify, onManageAccess }:
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isMouseInside, setIsMouseInside] = useState(false);
+
+  // Collaborative comments & signatures state
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [signatures, setSignatures] = useState<SignatureRecord[]>([]);
+  const [newCommentText, setNewCommentText] = useState("");
+  const [hasSigned, setHasSigned] = useState(false);
+  const [isSigning, setIsSigning] = useState(false);
+
+  // Load comments from local storage, and query true on-chain signatures from the blockchain
+  useEffect(() => {
+    if (showPreview && doc.docHash) {
+      setComments(getDocumentComments(doc.docHash));
+      
+      const loadOnChainSignaturesAndStatus = async () => {
+        const sigs: SignatureRecord[] = [];
+        try {
+          // 1. Check if owner has signed on-chain
+          const ownerSigned = await hasUserSigned(doc.docHash, doc.ownerAddress);
+          if (ownerSigned) {
+            sigs.push({ signer: doc.ownerAddress, timestamp: doc.createdAt || new Date().toISOString() });
+          }
+
+          // 2. Check shared recipients on-chain
+          if (doc.sharedWith && doc.sharedWith.length > 0) {
+            await Promise.all(
+              doc.sharedWith.map(async (recipient) => {
+                const signed = await hasUserSigned(doc.docHash, recipient.address);
+                if (signed) {
+                  // Retrieve local sync timestamp if available, else use current time
+                  const localSigs = getDocumentSignatures(doc.docHash);
+                  const matchingSig = localSigs.find(s => s.signer.toLowerCase() === recipient.address.toLowerCase());
+                  sigs.push({ 
+                    signer: recipient.address, 
+                    timestamp: matchingSig ? matchingSig.timestamp : recipient.grantedAt 
+                  });
+                }
+              })
+            );
+          } else if (walletAddress && walletAddress !== doc.ownerAddress.toLowerCase()) {
+            // Recipient viewing - check self
+            const selfSigned = await hasUserSigned(doc.docHash, walletAddress);
+            if (selfSigned) {
+              const localSigs = getDocumentSignatures(doc.docHash);
+              const matchingSig = localSigs.find(s => s.signer.toLowerCase() === walletAddress);
+              sigs.push({ 
+                signer: walletAddress, 
+                timestamp: matchingSig ? matchingSig.timestamp : new Date().toISOString() 
+              });
+            }
+          }
+        } catch (err) {
+          console.error("Failed to load on-chain signatures:", err);
+        }
+
+        setSignatures(sigs);
+        
+        if (walletAddress) {
+          try {
+            const signed = await hasUserSigned(doc.docHash, walletAddress);
+            setHasSigned(signed);
+          } catch {
+            setHasSigned(false);
+          }
+        }
+      };
+
+      loadOnChainSignaturesAndStatus();
+    }
+  }, [showPreview, doc.docHash, walletAddress, doc.ownerAddress, doc.sharedWith]);
+
+  const handleCommentSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCommentText.trim() || !walletAddress) return;
+    const updated = addDocumentComment(doc.docHash, walletAddress, newCommentText);
+    setComments(updated);
+    setNewCommentText("");
+  };
+
+  const handleSignDocument = async () => {
+    if (!walletAddress) return;
+    
+    setIsSigning(true);
+    setToastMessage(null);
+
+    try {
+      // Execute true on-chain signature transaction (gasless Relayer prioritised)
+      const result = await signDocumentOnChain(doc.docHash);
+      
+      setHasSigned(true);
+      setToastMessage("Document successfully approved & signed on-chain!");
+
+      // Update local state list
+      setSignatures(prev => {
+        if (prev.some(s => s.signer.toLowerCase() === walletAddress)) return prev;
+        return [...prev, { signer: walletAddress, timestamp: new Date().toISOString() }];
+      });
+
+      // Synchronize in local storage comments utility as fallback cache
+      signDocumentLocally(doc.docHash, walletAddress);
+
+      // Add to local audit log with the actual on-chain transaction hash
+      try {
+        const logsRaw = localStorage.getItem("sdc_audit_log");
+        const logs = logsRaw ? JSON.parse(logsRaw) : [];
+        logs.unshift({
+          id: Math.random().toString(),
+          docHash: doc.docHash,
+          action: "Document On-Chain Signed",
+          actor: walletAddress,
+          fileName: doc.name,
+          timestamp: new Date().toISOString(),
+          txHash: result.txHash,
+          category: "view"
+        });
+        localStorage.setItem("sdc_audit_log", JSON.stringify(logs));
+        window.dispatchEvent(new CustomEvent("sdc:audit-changed"));
+      } catch {}
+
+    } catch (err: any) {
+      console.error("Signature transaction failed:", err);
+      setToastMessage(err?.message || "On-chain signature failed.");
+    } finally {
+      setIsSigning(false);
+    }
+  };
+
+  const resolveAddressToLabel = (address: string) => {
+    const addrLower = address.toLowerCase();
+    
+    // Check if it is the owner
+    if (addrLower === doc.ownerAddress.toLowerCase()) {
+      let ownerEmail = "";
+      try {
+        const raw = localStorage.getItem("sdc_email_bindings");
+        if (raw) {
+          const bindings = JSON.parse(raw);
+          ownerEmail = Object.keys(bindings).find(k => bindings[k].toLowerCase() === addrLower) || "";
+        }
+      } catch {}
+      return `Owner ${ownerEmail ? `(${ownerEmail})` : ""}`;
+    }
+
+    // Check email bindings for recipients
+    try {
+      const raw = localStorage.getItem("sdc_email_bindings");
+      if (raw) {
+        const bindings = JSON.parse(raw);
+        const email = Object.keys(bindings).find(k => bindings[k].toLowerCase() === addrLower);
+        if (email) {
+          return `${address.slice(0, 6)}...${address.slice(-4)} (${email})`;
+        }
+      }
+    } catch {}
+
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  };
+
+  const [copiedSyncLink, setCopiedSyncLink] = useState(false);
+
+  const handleCopySyncLink = () => {
+    if (typeof window === "undefined") return;
+    
+    let currentBindings: Record<string, string> = {};
+    try {
+      const raw = localStorage.getItem("sdc_email_bindings");
+      currentBindings = raw ? JSON.parse(raw) : {};
+    } catch {}
+
+    const payload = {
+      docHash: doc.docHash,
+      comments: getDocumentComments(doc.docHash),
+      signatures: getDocumentSignatures(doc.docHash),
+      bindings: currentBindings,
+    };
+    
+    try {
+      const token = btoa(JSON.stringify(payload))
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+        
+      const syncUrl = `${window.location.origin}/share/sync?token=${token}`;
+      navigator.clipboard.writeText(syncUrl).then(() => {
+        setCopiedSyncLink(true);
+        setToastMessage("Collaboration sync link copied!");
+        setTimeout(() => setCopiedSyncLink(false), 2000);
+      });
+    } catch (err) {
+      console.error("Failed to generate sync link:", err);
+      setToastMessage("Error generating sync link.");
+    }
+  };
+
+  const [ownerEmailInput, setOwnerEmailInput] = useState("");
+  const [isNotifyingOwner, setIsNotifyingOwner] = useState(false);
+  const [notifySuccess, setNotifySuccess] = useState(false);
+
+  const getOwnerEmail = (): string => {
+    const ownerAddr = doc.ownerAddress.toLowerCase();
+    try {
+      const raw = localStorage.getItem("sdc_email_bindings");
+      if (raw) {
+        const bindings = JSON.parse(raw);
+        return Object.keys(bindings).find(k => bindings[k].toLowerCase() === ownerAddr) || "";
+      }
+    } catch {}
+    return "";
+  };
+
+  const handleNotifyOwner = async () => {
+    const ownerEmail = getOwnerEmail() || ownerEmailInput;
+    if (!ownerEmail) {
+      setToastMessage("Please enter the owner's email address.");
+      return;
+    }
+
+    setIsNotifyingOwner(true);
+    setToastMessage(null);
+
+    let currentBindings: Record<string, string> = {};
+    try {
+      const raw = localStorage.getItem("sdc_email_bindings");
+      currentBindings = raw ? JSON.parse(raw) : {};
+    } catch {}
+
+    const payload = {
+      docHash: doc.docHash,
+      comments: getDocumentComments(doc.docHash),
+      signatures: getDocumentSignatures(doc.docHash),
+      bindings: currentBindings,
+    };
+
+    try {
+      const token = btoa(JSON.stringify(payload))
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+        
+      const syncLink = `${window.location.origin}/share/sync?token=${token}`;
+      
+      const myEmail = Object.keys(currentBindings).find(
+        (k) => currentBindings[k].toLowerCase() === walletAddress
+      ) || "";
+
+      const response = await fetch("/api/sync-notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ownerEmail,
+          recipientEmail: myEmail,
+          documentName: doc.name,
+          syncLink,
+          commentsCount: comments.length,
+          hasSigned,
+        }),
+      });
+
+      const resData = await response.json();
+
+      if (response.ok) {
+        setNotifySuccess(true);
+        setToastMessage("Collaboration updates emailed to the owner!");
+        setTimeout(() => setNotifySuccess(false), 3000);
+      } else {
+        setToastMessage(resData.error || "Failed to notify owner.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setToastMessage("Error sending email notification.");
+    } finally {
+      setIsNotifyingOwner(false);
+    }
+  };
 
   const handleCopyField = (text: string, field: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -79,27 +357,41 @@ export default function DocumentCard({ doc, onShare, onVerify, onManageAccess }:
     const shortHash = doc.docHash ? `${doc.docHash.slice(0, 10)}...${doc.docHash.slice(-8)}` : "N/A";
     const shortToken = doc.shareToken ? `${doc.shareToken.slice(0, 8)}...${doc.shareToken.slice(-8)}` : "N/A";
     
+    // Resolve email address: prioritize the logged-in user email, then bound email, fallback to wallet address
+    let activeEmail = user?.email || "";
+    if (!activeEmail && wallet?.address) {
+      try {
+        const raw = localStorage.getItem("sdc_email_bindings");
+        if (raw) {
+          const bindings = JSON.parse(raw);
+          activeEmail = Object.keys(bindings).find(k => bindings[k].toLowerCase() === wallet.address.toLowerCase()) || "";
+        }
+      } catch {}
+    }
+    
+    const userLabel = activeEmail ? `${activeEmail} (${shortenAddress(wallet?.address || "")})` : (wallet?.address || "unknown viewer");
+    
     // High-density diagonal text including all required metadata
-    const text1 = `USER: ${viewerLabel} | HASH: ${shortHash} | TIME: ${timestamp}`;
+    const text1 = `USER: ${userLabel} | HASH: ${shortHash} | TIME: ${timestamp}`;
     const text2 = `TOKEN: ${shortToken} | PREVIEW ONLY - DO NOT RECORD`;
     
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="500" height="320" viewBox="0 0 500 320">
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="500" height="300" viewBox="0 0 500 300">
       <style>
         text {
           font-family: 'Courier New', Courier, monospace;
           font-size: 10px;
           font-weight: bold;
-          fill: rgba(34, 211, 238, 0.14);
-          text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.8), -1px -1px 1px rgba(0, 0, 0, 0.8);
+          fill: rgba(34, 211, 238, 0.12);
+          text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.3);
           letter-spacing: 0.5px;
         }
       </style>
-      <!-- Dual-angle grid to prevent rotation defeat -->
-      <text x="30" y="100" transform="rotate(-25 30 100)">${text1}</text>
-      <text x="30" y="140" transform="rotate(-25 30 140)">${text2}</text>
+      <!-- Single clean diagonal layout for readability and easy verification -->
+      <text x="40" y="80" transform="rotate(-20 40 80)">${text1}</text>
+      <text x="40" y="110" transform="rotate(-20 40 110)">${text2}</text>
       
-      <text x="30" y="220" transform="rotate(25 30 220)">${text1}</text>
-      <text x="30" y="260" transform="rotate(25 30 260)">${text2}</text>
+      <text x="40" y="200" transform="rotate(-20 40 200)">${text1}</text>
+      <text x="40" y="230" transform="rotate(-20 40 230)">${text2}</text>
     </svg>`;
     return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   };
@@ -117,6 +409,10 @@ export default function DocumentCard({ doc, onShare, onVerify, onManageAccess }:
     if (!showPreview) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowPreview(false);
+        return;
+      }
       const isCmdOrCtrl = e.metaKey || e.ctrlKey;
 
       // Block print, save, copy, and inspect
@@ -156,6 +452,9 @@ export default function DocumentCard({ doc, onShare, onVerify, onManageAccess }:
     };
 
     const handleBlur = () => {
+      if (document.activeElement && document.activeElement.tagName === "IFRAME") {
+        return;
+      }
       setIsBlurry(true);
       setToastMessage("Security Trigger: Focus lost. View blocked.");
     };
@@ -803,7 +1102,7 @@ export default function DocumentCard({ doc, onShare, onVerify, onManageAccess }:
                         style={{
                           padding: "24px",
                           flex: 1,
-                          overflowY: "auto",
+                          overflowY: previewType === "pdf" ? "hidden" : "auto",
                           position: "relative",
                           textAlign: "center",
                           userSelect: "none",
@@ -902,22 +1201,7 @@ export default function DocumentCard({ doc, onShare, onVerify, onManageAccess }:
                             }}
                           >
                             {previewType === "pdf" && previewUrl && (
-                              <iframe
-                                src={
-                                  doc.ownerAddress.toLowerCase() !== wallet?.address.toLowerCase() &&
-                                  doc.accessLevel === 1
-                                    ? `${previewUrl}#toolbar=0`
-                                    : previewUrl
-                                }
-                                style={{
-                                  width: "100%",
-                                  height: "100%",
-                                  minHeight: "560px",
-                                  border: "none",
-                                  borderRadius: "12px",
-                                  background: "white",
-                                }}
-                              />
+                              <PDFCanvasViewer url={previewUrl} />
                             )}
                             {previewType === "image" && previewUrl && (
                               <div style={{ background: "rgba(0,0,0,0.2)", padding: 10, borderRadius: 12, display: "inline-block" }}>
@@ -1068,6 +1352,230 @@ export default function DocumentCard({ doc, onShare, onVerify, onManageAccess }:
                                 </div>
                                 <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "monospace", wordBreak: "break-all", background: "rgba(0,0,0,0.25)", padding: "6px 10px", borderRadius: 8, marginTop: 4, border: "1px solid rgba(255,255,255,0.04)" }}>
                                   {doc.txHash.slice(0, 10)}...{doc.txHash.slice(-8)}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* On-Chain Signatures Panel */}
+                        {(isOwner || doc.accessLevel === 3) && (
+                          <div>
+                            <h4 style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: "var(--text-muted)", marginBottom: 12 }}>
+                              Decentralized Approvals
+                            </h4>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                              {signatures.length === 0 ? (
+                                <div style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>
+                                  No signatures registered yet.
+                                </div>
+                              ) : (
+                                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                  {signatures.map((sig, idx) => (
+                                    <div key={idx} style={{ background: "rgba(52, 211, 153, 0.04)", border: "1px solid rgba(52, 211, 153, 0.15)", borderRadius: 10, padding: 8 }}>
+                                      <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, color: "var(--accent-emerald)" }}>
+                                        <CheckCircle size={10} />
+                                        <span>Signed & Verified</span>
+                                      </div>
+                                      <div style={{ fontSize: 10, fontFamily: "monospace", color: "var(--text-secondary)", marginTop: 2, wordBreak: "break-all" }}>
+                                        {resolveAddressToLabel(sig.signer)}
+                                      </div>
+                                      <div style={{ fontSize: 8, color: "var(--text-muted)", marginTop: 1 }}>
+                                        {new Date(sig.timestamp).toLocaleString()}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {!isOwner && doc.accessLevel === 3 && (
+                                <div style={{ marginTop: 6 }}>
+                                  {hasSigned ? (
+                                    <div style={{ fontSize: 11, color: "var(--accent-emerald)", fontWeight: 600, textAlign: "center", background: "rgba(52, 211, 153, 0.08)", padding: "8px 12px", borderRadius: 10, border: "1px solid rgba(52, 211, 153, 0.2)" }}>
+                                      You have signed this document
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={handleSignDocument}
+                                      disabled={isSigning}
+                                      style={{
+                                        width: "100%",
+                                        background: "linear-gradient(135deg, #22d3ee, #818cf8)",
+                                        border: "none",
+                                        borderRadius: "10px",
+                                        color: "white",
+                                        padding: "8px 12px",
+                                        fontSize: 12,
+                                        fontWeight: 600,
+                                        cursor: isSigning ? "default" : "pointer",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        gap: 6,
+                                        opacity: isSigning ? 0.7 : 1,
+                                        boxShadow: "0 4px 12px rgba(34, 211, 238, 0.2)",
+                                      }}
+                                    >
+                                      {isSigning ? (
+                                        <Loader2 size={14} className="animate-spin" />
+                                      ) : (
+                                        <Shield size={14} />
+                                      )}
+                                      {isSigning ? "Signing on-chain..." : "Sign & Approve Document"}
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Collaboration Comments Panel */}
+                        <div>
+                          <h4 style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: "var(--text-muted)", marginBottom: 12 }}>
+                            Collaboration Notes
+                          </h4>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                            {/* Comment list */}
+                            <div 
+                              style={{ 
+                                display: "flex", 
+                                flexDirection: "column", 
+                                gap: 8, 
+                                maxHeight: "220px", 
+                                overflowY: "auto",
+                                paddingRight: 4
+                              }}
+                            >
+                              {comments.length === 0 ? (
+                                <div style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic", padding: "10px 0" }}>
+                                  No comments posted yet.
+                                </div>
+                              ) : (
+                                comments.map((c, idx) => (
+                                  <div key={idx} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)", borderRadius: 10, padding: 8 }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                                      <span style={{ fontSize: 9, fontFamily: "monospace", color: "var(--accent-teal)", fontWeight: 600 }}>
+                                        {resolveAddressToLabel(c.author)}
+                                      </span>
+                                      <span style={{ fontSize: 8, color: "var(--text-muted)" }}>
+                                        {new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+                                    </div>
+                                    <p style={{ fontSize: 11, color: "var(--text-secondary)", margin: 0, whiteSpace: "pre-wrap", textAlign: "left", lineHeight: 1.4 }}>
+                                      {c.content}
+                                    </p>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+
+                            {/* Comment Input */}
+                            {(isOwner || (doc.accessLevel !== undefined && doc.accessLevel >= 2)) && (
+                              <form onSubmit={handleCommentSubmit} style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+                                <textarea
+                                  placeholder="Type an annotation comment..."
+                                  value={newCommentText}
+                                  onChange={(e) => setNewCommentText(e.target.value)}
+                                  rows={2}
+                                  style={{
+                                    width: "100%",
+                                    background: "rgba(0,0,0,0.3)",
+                                    border: "1px solid var(--border-subtle)",
+                                    borderRadius: "8px",
+                                    padding: "8px",
+                                    fontSize: 11,
+                                    color: "var(--text-primary)",
+                                    resize: "none",
+                                    fontFamily: "inherit",
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" && !e.shiftKey) {
+                                      e.preventDefault();
+                                      handleCommentSubmit(e);
+                                    }
+                                  }}
+                                />
+                                <button
+                                  type="submit"
+                                  disabled={!newCommentText.trim()}
+                                  style={{
+                                    background: newCommentText.trim() ? "rgba(34, 211, 238, 0.15)" : "rgba(255,255,255,0.02)",
+                                    border: `1px solid ${newCommentText.trim() ? "rgba(34, 211, 238, 0.3)" : "rgba(255,255,255,0.05)"}`,
+                                    borderRadius: "8px",
+                                    color: newCommentText.trim() ? "var(--accent-teal)" : "var(--text-muted)",
+                                    padding: "6px 12px",
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    cursor: newCommentText.trim() ? "pointer" : "default",
+                                    textAlign: "center",
+                                    transition: "all 0.2s ease"
+                                  }}
+                                >
+                                  Add Note
+                                </button>
+                              </form>
+                            )}
+
+                            {/* Submit & Email Owner Panel */}
+                            {!isOwner && (
+                              <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px dashed rgba(255,255,255,0.08)" }}>
+                                {!(doc.ownerEmail || getOwnerEmail()) && (
+                                  <div style={{ marginBottom: 8 }}>
+                                    <label style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", fontWeight: 600, display: "block", marginBottom: 4 }}>
+                                      Owner's Email Address
+                                    </label>
+                                    <input
+                                      type="email"
+                                      placeholder="owner@example.com"
+                                      value={ownerEmailInput}
+                                      onChange={(e) => setOwnerEmailInput(e.target.value)}
+                                      style={{
+                                        width: "100%",
+                                        background: "rgba(0,0,0,0.3)",
+                                        border: "1px solid var(--border-subtle)",
+                                        borderRadius: "8px",
+                                        padding: "6px 8px",
+                                        fontSize: 11,
+                                        color: "var(--text-primary)",
+                                      }}
+                                    />
+                                  </div>
+                                )}
+                                <button
+                                  onClick={handleNotifyOwner}
+                                  disabled={isNotifyingOwner || (!(doc.ownerEmail || getOwnerEmail()) && !ownerEmailInput.trim())}
+                                  style={{
+                                    width: "100%",
+                                    background: "linear-gradient(135deg, #10b981, #059669)",
+                                    border: "none",
+                                    borderRadius: "10px",
+                                    color: "white",
+                                    padding: "8px 12px",
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    cursor: (isNotifyingOwner || (!(doc.ownerEmail || getOwnerEmail()) && !ownerEmailInput.trim())) ? "default" : "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    gap: 6,
+                                    opacity: (isNotifyingOwner || (!(doc.ownerEmail || getOwnerEmail()) && !ownerEmailInput.trim())) ? 0.6 : 1,
+                                    boxShadow: "0 4px 12px rgba(16, 185, 129, 0.15)",
+                                  }}
+                                >
+                                  {isNotifyingOwner ? (
+                                    <Loader2 size={12} className="animate-spin" />
+                                  ) : notifySuccess ? (
+                                    <CheckCircle size={12} />
+                                  ) : (
+                                    <Send size={12} />
+                                  )}
+                                  {isNotifyingOwner ? "Notifying Owner..." : notifySuccess ? "Notification Sent!" : "Submit & Email Owner"}
+                                </button>
+                                <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 4, textAlign: "center", lineHeight: 1.4 }}>
+                                  {(doc.ownerEmail || getOwnerEmail()) 
+                                    ? `Direct notification will be sent to ${doc.ownerEmail || getOwnerEmail()}` 
+                                    : "Enter the owner's email to send the sync link directly"}
                                 </div>
                               </div>
                             )}

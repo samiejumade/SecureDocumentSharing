@@ -74,6 +74,9 @@ export function useDocuments() {
               if (level === 0) {
                 updated = true;
                 return { ...doc, status: "revoked" as const };
+              } else if (level !== doc.accessLevel) {
+                updated = true;
+                return { ...doc, accessLevel: level };
               }
             } catch (err) {
               // Ignore network errors to avoid false revocation triggers

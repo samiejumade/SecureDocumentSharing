@@ -28,6 +28,7 @@ interface TokenPayload {
   cid: string;
   level: number;
   sender: string;
+  senderEmail?: string;
   sharedAt: string;
   encKeyHex: string;
   recipientAddress: string;
@@ -57,6 +58,18 @@ function importSharedDocument(
     );
     if (alreadyImported) return false;
 
+    // Save owner email binding locally for the recipient browser to resolve
+    if (payload.senderEmail && payload.sender) {
+      try {
+        const rawBindings = localStorage.getItem("sdc_email_bindings");
+        const bindings = rawBindings ? JSON.parse(rawBindings) : {};
+        bindings[payload.senderEmail.toLowerCase().trim()] = payload.sender.toLowerCase().trim();
+        localStorage.setItem("sdc_email_bindings", JSON.stringify(bindings));
+      } catch (err) {
+        console.error("Failed to save owner email binding:", err);
+      }
+    }
+
     const doc: StoredDocument = {
       id: generateId(),
       name: payload.docName,
@@ -66,6 +79,7 @@ function importSharedDocument(
       cid: payload.cid,
       encKeyHex: payload.encKeyHex || "",
       ownerAddress: payload.sender,
+      ownerEmail: payload.senderEmail || "",
       recipientAddress: recipientAddress.toLowerCase(),
       docType: "business",
       createdAt: payload.sharedAt,

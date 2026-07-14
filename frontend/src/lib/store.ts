@@ -17,6 +17,7 @@ export interface StoredDocument {
   cid: string;              // IPFS CID
   encKeyHex: string;        // AES key (hex) — owner-only
   ownerAddress: string;
+  ownerEmail?: string;
   recipientAddress?: string;
   docType: DocType;
   createdAt: string;        // ISO timestamp
@@ -94,25 +95,41 @@ export function updateDocumentStatus(id: string, status: DocStatus): void {
 export function addSharedAccess(docId: string, access: SharedAccess): void {
   const doc = getDocumentById(docId);
   if (doc) {
-    // Update owner's document
-    const alreadyShared = doc.sharedWith.some((s) => s.address.toLowerCase() === access.address.toLowerCase());
-    if (!alreadyShared) {
+    // Update owner's document recipient list
+    const existingIndex = doc.sharedWith.findIndex((s) => s.address.toLowerCase() === access.address.toLowerCase());
+    if (existingIndex !== -1) {
+      doc.sharedWith[existingIndex] = {
+        ...doc.sharedWith[existingIndex],
+        level: access.level,
+        grantedAt: access.grantedAt,
+        txHash: access.txHash,
+        email: access.email || doc.sharedWith[existingIndex].email,
+      };
+    } else {
       doc.sharedWith.push(access);
     }
     doc.status = "shared";
     saveDocument(doc);
 
-    // Create a copy for the recipient in local storage
+    // Create or update the copy for the recipient in local storage
     const allDocs = getDocuments();
     const recipientAddressLower = access.address.toLowerCase();
-    const alreadyImported = allDocs.some(
+    
+    const recipientDocIndex = allDocs.findIndex(
       (d) =>
         d.docHash === doc.docHash &&
         d.recipientAddress?.toLowerCase() === recipientAddressLower &&
         d.status !== "revoked"
     );
 
-    if (!alreadyImported) {
+    if (recipientDocIndex !== -1) {
+      // Update existing document metadata copy in place
+      allDocs[recipientDocIndex].accessLevel = access.level;
+      allDocs[recipientDocIndex].txHash = access.txHash;
+      localStorage.setItem("sdc_documents", JSON.stringify(allDocs));
+      window.dispatchEvent(new CustomEvent("sdc:documents-changed"));
+    } else {
+      // Create new metadata copy
       const recipientDoc: StoredDocument = {
         id: generateId(),
         name: doc.name,

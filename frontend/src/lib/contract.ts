@@ -4,10 +4,10 @@
    ───────────────────────────────────────────────── */
 
 export const CONTRACT_ADDRESS =
-  process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || "0xb1a3A31Bd8368C2a5ee675D178cfbD0B377B537C";
+  process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || "0x7a66d8Ecc907DB6BC12a6F8Ea2FA3d1BD6C3EE0C";
 
 export const FORWARDER_ADDRESS =
-  process.env.NEXT_PUBLIC_FORWARDER_ADDRESS || "0x9Cb33FCA649E42CeF8A6ed3872b083e4AB26CedE";
+  process.env.NEXT_PUBLIC_FORWARDER_ADDRESS || "0x0000000000000000000000000000000000000000";
 
 export const AMOY_CHAIN_ID = 80002;
 
@@ -247,6 +247,31 @@ export const CONTRACT_ABI = [
       }
     ],
     "name": "DocumentCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "docHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "signer",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "ts",
+        "type": "uint256"
+      }
+    ],
+    "name": "DocumentSigned",
     "type": "event"
   },
   {
@@ -638,6 +663,30 @@ export const CONTRACT_ABI = [
   {
     "inputs": [
       {
+        "internalType": "bytes32",
+        "name": "_dh",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "hasUserSigned",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "initialOwner",
         "type": "address"
@@ -788,6 +837,19 @@ export const CONTRACT_ABI = [
       }
     ],
     "name": "setTrustedForwarder",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "_dh",
+        "type": "bytes32"
+      }
+    ],
+    "name": "signDocument",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

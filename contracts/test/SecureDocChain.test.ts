@@ -151,4 +151,23 @@ describe("SecureDocChain UUPS Upgradeable & Gasless Registry", function () {
     const state = await secureDocChain.getDocumentState(docHash);
     expect(state.owner).to.equal(user1.address);
   });
+
+  it("Should allow signing only for users with accessLevel >= 3", async function () {
+    const docHash = ethers.keccak256(ethers.toUtf8Bytes("sign_test"));
+    await secureDocChain.connect(user1).createDocument(docHash, "cid_sign", "business", 0, false);
+    await secureDocChain.connect(user1).batchGrantAccess(docHash, [user2.address, user3.address], [2, 3]);
+
+    // user2 (level 2) fails to sign
+    await expect(secureDocChain.connect(user2).signDocument(docHash)).to.be.revertedWith("Unauthorized to sign");
+
+    // user3 (level 3) signs successfully
+    await expect(secureDocChain.connect(user3).signDocument(docHash)).to.emit(secureDocChain, "DocumentSigned");
+
+    // Verify state
+    expect(await secureDocChain.hasUserSigned(docHash, user3.address)).to.be.true;
+    expect(await secureDocChain.hasUserSigned(docHash, user2.address)).to.be.false;
+
+    // Double signing is blocked
+    await expect(secureDocChain.connect(user3).signDocument(docHash)).to.be.revertedWith("Already signed");
+  });
 });
