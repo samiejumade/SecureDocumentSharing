@@ -49,7 +49,12 @@ function WalletGate({ children }: { children: React.ReactNode }) {
     const walletAddress = normalizeAddress(wallet.address);
     const boundAddress = bindings[emailKey];
 
-    if (!boundAddress) {
+    // Find if this wallet address is already bound to any other email
+    const boundEmail = Object.keys(bindings).find(
+      (k) => normalizeAddress(bindings[k]) === walletAddress
+    );
+
+    if (!boundAddress && !boundEmail) {
       const nextBindings = { ...bindings, [emailKey]: walletAddress };
       writeBindings(nextBindings);
       setBindings(nextBindings);
@@ -59,7 +64,11 @@ function WalletGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (normalizeAddress(boundAddress) !== walletAddress) {
+    if (boundAddress && normalizeAddress(boundAddress) !== walletAddress) {
+      return;
+    }
+
+    if (boundEmail && normalizeEmail(boundEmail) !== emailKey) {
       return;
     }
 
@@ -70,13 +79,30 @@ function WalletGate({ children }: { children: React.ReactNode }) {
 
   const conflict = useMemo(() => {
     if (!user?.email || !wallet?.address) return null;
-    const bound = bindings[normalizeEmail(user.email)];
-    if (!bound) return null;
-    if (normalizeAddress(bound) === normalizeAddress(wallet.address)) return null;
-    return {
-      email: user.email,
-      boundAddress: bound,
-    };
+    const emailKey = normalizeEmail(user.email);
+    const walletAddress = normalizeAddress(wallet.address);
+
+    const boundAddress = bindings[emailKey];
+    if (boundAddress && normalizeAddress(boundAddress) !== walletAddress) {
+      return {
+        type: "email-already-bound",
+        email: user.email,
+        boundAddress,
+      };
+    }
+
+    const boundEmail = Object.keys(bindings).find(
+      (k) => normalizeAddress(bindings[k]) === walletAddress
+    );
+    if (boundEmail && normalizeEmail(boundEmail) !== emailKey) {
+      return {
+        type: "wallet-already-bound",
+        email: boundEmail,
+        boundAddress: wallet.address,
+      };
+    }
+
+    return null;
   }, [user, wallet, bindings]);
 
   const handleDisconnect = () => {
@@ -122,7 +148,11 @@ function WalletGate({ children }: { children: React.ReactNode }) {
           </div>
           <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 12 }}>Wallet Binding Conflict</h2>
           <p style={{ fontSize: 14, color: "var(--text-secondary)", marginBottom: 24, lineHeight: 1.7 }}>
-            This email ([${conflict.email}]) is already bound to wallet address: [${conflict.boundAddress}]. You must connect with the linked wallet address to continue.
+            {conflict.type === "email-already-bound" ? (
+              `This email (${conflict.email}) is already bound to wallet address: [${conflict.boundAddress}]. You must connect with the linked wallet address to continue.`
+            ) : (
+              `This wallet address (${conflict.boundAddress}) is already bound to a different email: [${conflict.email}]. Please connect a different wallet or log in with the linked email.`
+            )}
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
             <Button variant="secondary" onClick={handleDisconnect} icon={<Wallet size={16} />}>

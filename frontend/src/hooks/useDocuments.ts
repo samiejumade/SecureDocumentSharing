@@ -28,7 +28,7 @@ export function useDocuments() {
       return;
     }
     const filtered = allDocs.filter((d) => {
-      const isOwner = d.ownerAddress.toLowerCase() === wallet.address.toLowerCase();
+      const isOwner = d.ownerAddress.toLowerCase() === wallet.address.toLowerCase() && !d.recipientAddress;
       const isRecipient = d.recipientAddress?.toLowerCase() === wallet.address.toLowerCase();
       return isOwner || (isRecipient && d.status !== "revoked");
     });
@@ -74,6 +74,9 @@ export function useDocuments() {
               if (level === 0) {
                 updated = true;
                 return { ...doc, status: "revoked" as const };
+              } else if (level !== doc.accessLevel) {
+                updated = true;
+                return { ...doc, accessLevel: level };
               }
             } catch (err) {
               // Ignore network errors to avoid false revocation triggers
@@ -102,10 +105,28 @@ export function useDocuments() {
 export function useAuditLog() {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [mounted, setMounted] = useState(false);
+  const { wallet } = useWallet();
 
   const refresh = useCallback(() => {
-    setEntries(getAuditEntries());
-  }, []);
+    const allEntries = getAuditEntries();
+    if (!wallet) {
+      setEntries(allEntries);
+      return;
+    }
+    const myDocs = getDocuments().filter((d) => {
+      const isOwner = d.ownerAddress.toLowerCase() === wallet.address.toLowerCase() && !d.recipientAddress;
+      const isRecipient = d.recipientAddress?.toLowerCase() === wallet.address.toLowerCase();
+      return isOwner || (isRecipient && d.status !== "revoked");
+    });
+    const myDocHashes = new Set(myDocs.map((d) => d.docHash.toLowerCase()));
+
+    const filtered = allEntries.filter((entry) => {
+      const isActor = entry.actor.toLowerCase() === wallet.address.toLowerCase();
+      const isRelatedToMyDoc = myDocHashes.has(entry.docHash.toLowerCase());
+      return isActor || isRelatedToMyDoc;
+    });
+    setEntries(filtered);
+  }, [wallet]);
 
   useEffect(() => {
     refresh();

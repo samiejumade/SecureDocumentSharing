@@ -1,29 +1,93 @@
-# Dependencies
-node_modules/
+# ═══════════════════════════════════════════════════
+#  SecureDocChain — .gitignore
+# ═══════════════════════════════════════════════════
 
-# Environment files
+# ── Dependencies ─────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Environment / Secrets ────────────────────────
+# CRITICAL: Never commit secrets, API keys, or private keys
 .env
 .env.local
-.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.staging
+*.env
+!.env.example
+!contracts/.env.example
 
-# Build output
+# ── Private Keys & Certificates ──────────────────
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+*.cert
+
+# ── Next.js (frontend) ──────────────────────────
 .next/
 out/
 build/
 dist/
+.vercel
 
-# IDE
+# ── Hardhat / Solidity (contracts) ───────────────
+contracts/artifacts/
+contracts/cache/
+contracts/typechain-types/
+contracts/out/
+contracts/compile_out.txt
+
+# OpenZeppelin upgrade manifest (contains deployment addresses)
+.openzeppelin/
+
+# ── Foundry (if re-added later) ──────────────────
+contracts/lib/
+contracts/src/Counter.sol
+contracts/test/Counter.t.sol
+contracts/script/
+
+# ── IDE / Editor ─────────────────────────────────
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+*.sublime-workspace
+*.sublime-project
 
-# OS
+# ── OS Files ─────────────────────────────────────
 .DS_Store
+.DS_Store?
+._*
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 
-# Debug logs
+# ── Logs ─────────────────────────────────────────
 npm-debug.log*
 yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.log
 
-# Misc
-*.pem
-/plans
+# ── Testing / Coverage ──────────────────────────
+coverage/
+coverage.json
+.nyc_output/
+*.lcov
+
+# ── Misc ─────────────────────────────────────────
+*.tgz
+*.tsbuildinfo
+.eslintcache
+.turbo/
+
+# ── Plans (internal, not for public repo) ────────
+/plans/
