@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 
 interface RevokedEntry {
   docHash: string;
@@ -17,28 +18,44 @@ interface RevokedEntry {
   revokedAt: string;
 }
 
-const DATA_DIR = join(process.cwd(), ".data");
+// In-memory fallback cache for serverless host instances
+let memoryCache: RevokedEntry[] = [];
+
+const DATA_DIR = join(tmpdir(), "sdc_cache");
 const REVOKED_FILE = join(DATA_DIR, "revoked-access.json");
 
 function ensureDataDir() {
-  if (!existsSync(DATA_DIR)) {
-    mkdirSync(DATA_DIR, { recursive: true });
+  try {
+    if (!existsSync(DATA_DIR)) {
+      mkdirSync(DATA_DIR, { recursive: true });
+    }
+  } catch (err) {
+    console.warn("Failed to create temporary cache directory:", err);
   }
 }
 
 function getRevokedList(): RevokedEntry[] {
-  ensureDataDir();
-  if (!existsSync(REVOKED_FILE)) return [];
   try {
-    return JSON.parse(readFileSync(REVOKED_FILE, "utf-8"));
-  } catch {
-    return [];
+    ensureDataDir();
+    if (!existsSync(REVOKED_FILE)) return memoryCache;
+    const raw = readFileSync(REVOKED_FILE, "utf-8");
+    const list = JSON.parse(raw) as RevokedEntry[];
+    memoryCache = list;
+    return list;
+  } catch (err) {
+    console.warn("Temp file read failed, falling back to memory cache:", err);
+    return memoryCache;
   }
 }
 
 function saveRevokedList(list: RevokedEntry[]) {
-  ensureDataDir();
-  writeFileSync(REVOKED_FILE, JSON.stringify(list, null, 2));
+  memoryCache = list;
+  try {
+    ensureDataDir();
+    writeFileSync(REVOKED_FILE, JSON.stringify(list, null, 2));
+  } catch (err) {
+    console.error("Temp file write failed:", err);
+  }
 }
 
 /**
